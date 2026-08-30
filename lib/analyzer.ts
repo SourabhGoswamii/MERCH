@@ -36,28 +36,21 @@ export async function analyzeTable(tableName: string) {
     `SELECT * FROM "${tableName}" LIMIT 10`
   );
 
-  const prompt = `
-You are a data semantic analyzer.
-
+  const prompt = `You are a data semantic analyzer.
 Analyze this dataset.
-
 TABLE:
 ${tableName}
-
 COLUMNS:
 ${JSON.stringify(columns, null, 2)}
-
 SAMPLE ROWS:
 ${JSON.stringify(sampleRows, null, 2)}
-
 Return ONLY valid JSON in exactly this format:
-
 {
   "table": "table name",
   "entity": "real-world entity represented by one row",
   "description": "what one row represents",
   "columns": {
-    "column_name": "simple explanation of the column"
+    "column_name": "simple explanation of the column and data type, including any relationships to other columns or tables",
   }
 }
 
