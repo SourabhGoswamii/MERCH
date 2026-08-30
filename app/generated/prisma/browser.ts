@@ -17,4 +17,13 @@ import * as Prisma from './internal/prismaNamespaceBrowser'
 export { Prisma }
 export * as $Enums from './enums'
 export * from './enums';
-
+/**
+ * Model Dataset
+ * 
+ */
+export type Dataset = Prisma.DatasetModel
+/**
+ * Model DatasetContext
+ * 
+ */
+export type DatasetContext = Prisma.DatasetContextModel

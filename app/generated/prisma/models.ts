@@ -8,4 +8,6 @@
  *
  * 🟢 You can import this file directly.
  */
+export type * from './models/Dataset'
+export type * from './models/DatasetContext'
 export type * from './commonInputTypes'

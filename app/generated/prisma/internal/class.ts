@@ -20,7 +20,7 @@ const config: runtime.GetPrismaClientConfig = {
   "clientVersion": "7.10.0",
   "engineVersion": "0edf323efd1d98336f3f0a68684b56f689b900d3",
   "activeProvider": "postgresql",
-  "inlineSchema": "generator client {\n  provider = \"prisma-client\"\n  output   = \"../app/generated/prisma\"\n}\n\ndatasource db {\n  provider = \"postgresql\"\n}\n",
+  "inlineSchema": "generator client {\n  provider = \"prisma-client\"\n  output   = \"../app/generated/prisma\"\n}\n\ndatasource db {\n  provider = \"postgresql\"\n}\n\nenum DatasetStatus {\n  UPLOADING\n  ANALYZING\n  READY\n  FAILED\n}\n\nmodel Dataset {\n  id        String          @id @default(uuid())\n  fileName  String          @map(\"file_name\")\n  tableName String          @unique @map(\"table_name\")\n  rowCount  Int             @default(0) @map(\"row_count\")\n  columns   Json\n  status    DatasetStatus   @default(UPLOADING)\n  error     String?\n  createdAt DateTime        @default(now()) @map(\"created_at\")\n  updatedAt DateTime        @updatedAt @map(\"updated_at\")\n  context   DatasetContext?\n\n  @@map(\"datasets\")\n}\n\nmodel DatasetContext {\n  id        String   @id @default(uuid())\n  datasetId String   @unique @map(\"dataset_id\")\n  context   Json\n  createdAt DateTime @default(now()) @map(\"created_at\")\n  updatedAt DateTime @updatedAt @map(\"updated_at\")\n  dataset   Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)\n\n  @@map(\"dataset_context\")\n}\n",
   "runtimeDataModel": {
     "models": {},
     "enums": {},
@@ -32,10 +32,10 @@ const config: runtime.GetPrismaClientConfig = {
   }
 }
 
-config.runtimeDataModel = JSON.parse("{\"models\":{},\"enums\":{},\"types\":{}}")
+config.runtimeDataModel = JSON.parse("{\"models\":{\"Dataset\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"fileName\",\"kind\":\"scalar\",\"type\":\"String\",\"dbName\":\"file_name\"},{\"name\":\"tableName\",\"kind\":\"scalar\",\"type\":\"String\",\"dbName\":\"table_name\"},{\"name\":\"rowCount\",\"kind\":\"scalar\",\"type\":\"Int\",\"dbName\":\"row_count\"},{\"name\":\"columns\",\"kind\":\"scalar\",\"type\":\"Json\"},{\"name\":\"status\",\"kind\":\"enum\",\"type\":\"DatasetStatus\"},{\"name\":\"error\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\",\"dbName\":\"created_at\"},{\"name\":\"updatedAt\",\"kind\":\"scalar\",\"type\":\"DateTime\",\"dbName\":\"updated_at\"},{\"name\":\"context\",\"kind\":\"object\",\"type\":\"DatasetContext\",\"relationName\":\"DatasetToDatasetContext\"}],\"dbName\":\"datasets\",\"schema\":null},\"DatasetContext\":{\"fields\":[{\"name\":\"id\",\"kind\":\"scalar\",\"type\":\"String\"},{\"name\":\"datasetId\",\"kind\":\"scalar\",\"type\":\"String\",\"dbName\":\"dataset_id\"},{\"name\":\"context\",\"kind\":\"scalar\",\"type\":\"Json\"},{\"name\":\"createdAt\",\"kind\":\"scalar\",\"type\":\"DateTime\",\"dbName\":\"created_at\"},{\"name\":\"updatedAt\",\"kind\":\"scalar\",\"type\":\"DateTime\",\"dbName\":\"updated_at\"},{\"name\":\"dataset\",\"kind\":\"object\",\"type\":\"Dataset\",\"relationName\":\"DatasetToDatasetContext\"}],\"dbName\":\"dataset_context\",\"schema\":null}},\"enums\":{},\"types\":{}}")
 config.parameterizationSchema = {
-  strings: JSON.parse("[]"),
-  graph: "AAAA"
+  strings: JSON.parse("[\"where\",\"dataset\",\"context\",\"Dataset.findUnique\",\"Dataset.findUniqueOrThrow\",\"orderBy\",\"cursor\",\"Dataset.findFirst\",\"Dataset.findFirstOrThrow\",\"Dataset.findMany\",\"data\",\"Dataset.createOne\",\"Dataset.createMany\",\"Dataset.createManyAndReturn\",\"Dataset.updateOne\",\"Dataset.updateMany\",\"Dataset.updateManyAndReturn\",\"create\",\"update\",\"Dataset.upsertOne\",\"Dataset.deleteOne\",\"Dataset.deleteMany\",\"having\",\"_count\",\"_avg\",\"_sum\",\"_min\",\"_max\",\"Dataset.groupBy\",\"Dataset.aggregate\",\"DatasetContext.findUnique\",\"DatasetContext.findUniqueOrThrow\",\"DatasetContext.findFirst\",\"DatasetContext.findFirstOrThrow\",\"DatasetContext.findMany\",\"DatasetContext.createOne\",\"DatasetContext.createMany\",\"DatasetContext.createManyAndReturn\",\"DatasetContext.updateOne\",\"DatasetContext.updateMany\",\"DatasetContext.updateManyAndReturn\",\"DatasetContext.upsertOne\",\"DatasetContext.deleteOne\",\"DatasetContext.deleteMany\",\"DatasetContext.groupBy\",\"DatasetContext.aggregate\",\"AND\",\"OR\",\"NOT\",\"id\",\"datasetId\",\"createdAt\",\"updatedAt\",\"equals\",\"in\",\"notIn\",\"lt\",\"lte\",\"gt\",\"gte\",\"not\",\"string_contains\",\"string_starts_with\",\"string_ends_with\",\"array_starts_with\",\"array_ends_with\",\"array_contains\",\"contains\",\"startsWith\",\"endsWith\",\"fileName\",\"tableName\",\"rowCount\",\"columns\",\"DatasetStatus\",\"status\",\"error\",\"is\",\"isNot\",\"connectOrCreate\",\"upsert\",\"disconnect\",\"delete\",\"connect\",\"set\",\"increment\",\"decrement\",\"multiply\",\"divide\"]"),
+  graph: "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-AQAAAAE_AQAAAAFAgAAAAAFBgAAAAAFCgAAAAAEOFwAAOQAgGgAAPQAgGwAAPQAgNQEAAAABNgEAAAAENwEAAAAEOAEAAAABOQEAAAABOgEAAAABOwEAAAABPAEAPAAhQwEAAAABRAEAAAABRQEAAAABCzUBAAAAATYBAAAABDcBAAAABDgBAAAAATkBAAAAAToBAAAAATsBAAAAATwBAD0AIUMBAAAAAUQBAAAAAUUBAAAAAQkBAABBACACAAA_ACAuAAA-ADAvAAADABAwAAA-ADAxAQBOACEyAQBOACEzQABAACE0QABAACEMNYAAAAABOIAAAAABOYAAAAABOoAAAAABO4AAAAABPIAAAAABPQEAAAABPgEAAAABPwEAAAABQIAAAAABQYAAAAABQoAAAAABCDVAAAAAATZAAAAABDdAAAAABDhAAAAAATlAAAAAATpAAAAAATtAAAAAATxAADoAIQ8CAABSACAuAABNADAvAAAGABAwAABNADAxAQBOACEzQABAACE0QABAACFGAQBOACFHAQBOACFIAgBPACFJAAA_ACBLAABQSyJMAQBRACFNAAAGACBOAAAGACAMLgAAQgAwLwAAGQAQMAAAQgAwMQEANQAhM0AANwAhNEAANwAhRgEANQAhRwEANQAhSAIAQwAhSQAANgAgSwAAREsiTAEARQAhDRcAADkAIBgAAEwAIBkAADkAIBoAADkAIBsAADkAIDUCAAAAATYCAAAABDcCAAAABDgCAAAAATkCAAAAAToCAAAAATsCAAAAATwCAEsAIQcXAAA5ACAaAABKACAbAABKACA1AAAASwI2AAAASwg3AAAASwg8AABJSyIOFwAARwAgGgAASAAgGwAASAAgNQEAAAABNgEAAAAFNwEAAAAFOAEAAAABOQEAAAABOgEAAAABOwEAAAABPAEARgAhQwEAAAABRAEAAAABRQEAAAABDhcAAEcAIBoAAEgAIBsAAEgAIDUBAAAAATYBAAAABTcBAAAABTgBAAAAATkBAAAAAToBAAAAATsBAAAAATwBAEYAIUMBAAAAAUQBAAAAAUUBAAAAAQg1AgAAAAE2AgAAAAU3AgAAAAU4AgAAAAE5AgAAAAE6AgAAAAE7AgAAAAE8AgBHACELNQEAAAABNgEAAAAFNwEAAAAFOAEAAAABOQEAAAABOgEAAAABOwEAAAABPAEASAAhQwEAAAABRAEAAAABRQEAAAABBxcAADkAIBoAAEoAIBsAAEoAIDUAAABLAjYAAABLCDcAAABLCDwAAElLIgQ1AAAASwI2AAAASwg3AAAASwg8AABKSyINFwAAOQAgGAAATAAgGQAAOQAgGgAAOQAgGwAAOQAgNQIAAAABNgIAAAAENwIAAAAEOAIAAAABOQIAAAABOgIAAAABOwIAAAABPAIASwAhCDUIAAAAATYIAAAABDcIAAAABDgIAAAAATkIAAAAAToIAAAAATsIAAAAATwIAEwAIQ0CAABSACAuAABNADAvAAAGABAwAABNADAxAQBOACEzQABAACE0QABAACFGAQBOACFHAQBOACFIAgBPACFJAAA_ACBLAABQSyJMAQBRACELNQEAAAABNgEAAAAENwEAAAAEOAEAAAABOQEAAAABOgEAAAABOwEAAAABPAEAPQAhQwEAAAABRAEAAAABRQEAAAABCDUCAAAAATYCAAAABDcCAAAABDgCAAAAATkCAAAAAToCAAAAATsCAAAAATwCADkAIQQ1AAAASwI2AAAASwg3AAAASwg8AABKSyILNQEAAAABNgEAAAAFNwEAAAAFOAEAAAABOQEAAAABOgEAAAABOwEAAAABPAEASAAhQwEAAAABRAEAAAABRQEAAAABCwEAAEEAIAIAAD8AIC4AAD4AMC8AAAMAEDAAAD4AMDEBAE4AITIBAE4AITNAAEAAITRAAEAAIU0AAAMAIE4AAAMAIAAAAAFUAQAAAAEBVEAAAAABBREAAGwAIBIAAG8AIE8AAG0AIFAAAG4AIFMAAAEAIAMRAABsACBPAABtACBTAAABACACAgAAawAgTAAAWwAgAAAAAAAABVQCAAAAAVUCAAAAAVYCAAAAAVcCAAAAAVgCAAAAAQFUAAAASwIBVAEAAAABBxEAAGUAIBIAAGgAIE8AAGYAIFAAAGcAIFEAAAMAIFIAAAMAIFMAABwAIAQCgAAAAAExAQAAAAEzQAAAAAE0QAAAAAECAAAAHAAgEQAAZQAgAwAAAAMAIBEAAGUAIBIAAGkAIAYAAAADACACgAAAAAEKAABpACAxAQBWACEzQABXACE0QABXACEEAoAAAAABMQEAVgAhM0AAVwAhNEAAVwAhAxEAAGUAIE8AAGYAIFMAABwAIAEBAABaACAJMQEAAAABM0AAAAABNEAAAAABRgEAAAABRwEAAAABSAIAAAABSYAAAAABSwAAAEsCTAEAAAABAgAAAAEAIBEAAGwAIAMAAAAGACARAABsACASAABwACALAAAABgAgCgAAcAAgMQEAVgAhM0AAVwAhNEAAVwAhRgEAVgAhRwEAVgAhSAIAYQAhSYAAAAABSwAAYksiTAEAYwAhCTEBAFYAITNAAFcAITRAAFcAIUYBAFYAIUcBAFYAIUgCAGEAIUmAAAAAAUsAAGJLIkwBAGMAIQECBAIBAQABAAAABRcABxgACBkACRoAChsACwAAAAAABRcABxgACBkACRoAChsACwEBAAEBAQABAxcAEBoAERsAEgAAAAMXABAaABEbABIDAgEEBQEHCAEICQEJCgELDAEMDgMNDwQOEQEPEwMQFAUTFQEUFgEVFwMcGgYdGwweHQIfHgIgIAIhIQIiIgIjJAIkJgMlJw0mKQInKwMoLA4pLQIqLgIrLwMsMg8tMxM"
 }
 
 async function decodeBase64AsWasm(wasmBase64: string): Promise<WebAssembly.Module> {
@@ -70,8 +70,8 @@ export interface PrismaClientConstructor {
    * const prisma = new PrismaClient({
    *   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL })
    * })
-   * // Fetch zero or more Users
-   * const users = await prisma.user.findMany()
+   * // Fetch zero or more Datasets
+   * const datasets = await prisma.dataset.findMany()
    * ```
    * 
    * Read more in our [docs](https://pris.ly/d/client).
@@ -94,8 +94,8 @@ export interface PrismaClientConstructor {
  * const prisma = new PrismaClient({
  *   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL })
  * })
- * // Fetch zero or more Users
- * const users = await prisma.user.findMany()
+ * // Fetch zero or more Datasets
+ * const datasets = await prisma.dataset.findMany()
  * ```
  * 
  * Read more in our [docs](https://pris.ly/d/client).
@@ -188,7 +188,25 @@ export interface PrismaClient<
     extArgs: ExtArgs
   }>>
 
-    
+      /**
+   * `prisma.dataset`: Exposes CRUD operations for the **Dataset** model.
+    * Example usage:
+    * ```ts
+    * // Fetch zero or more Datasets
+    * const datasets = await prisma.dataset.findMany()
+    * ```
+    */
+  get dataset(): Prisma.DatasetDelegate<ExtArgs, { omit: OmitOpts }>;
+
+  /**
+   * `prisma.datasetContext`: Exposes CRUD operations for the **DatasetContext** model.
+    * Example usage:
+    * ```ts
+    * // Fetch zero or more DatasetContexts
+    * const datasetContexts = await prisma.datasetContext.findMany()
+    * ```
+    */
+  get datasetContext(): Prisma.DatasetContextDelegate<ExtArgs, { omit: OmitOpts }>;
 }
 
 export function getPrismaClientClass(): PrismaClientConstructor {

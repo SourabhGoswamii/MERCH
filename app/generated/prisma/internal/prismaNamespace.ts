@@ -397,7 +397,8 @@ type FieldRefInputType<Model, FieldType> = Model extends never ? never : FieldRe
 
 
 export const ModelName = {
-
+  Dataset: 'Dataset',
+  DatasetContext: 'DatasetContext'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -413,10 +414,159 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: never
+    modelProps: "dataset" | "datasetContext"
     txIsolationLevel: TransactionIsolationLevel
   }
-  model: {}
+  model: {
+    Dataset: {
+      payload: Prisma.$DatasetPayload<ExtArgs>
+      fields: Prisma.DatasetFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.DatasetFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.DatasetFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetPayload>
+        }
+        findFirst: {
+          args: Prisma.DatasetFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.DatasetFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetPayload>
+        }
+        findMany: {
+          args: Prisma.DatasetFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetPayload>[]
+        }
+        create: {
+          args: Prisma.DatasetCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetPayload>
+        }
+        createMany: {
+          args: Prisma.DatasetCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.DatasetCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetPayload>[]
+        }
+        delete: {
+          args: Prisma.DatasetDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetPayload>
+        }
+        update: {
+          args: Prisma.DatasetUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetPayload>
+        }
+        deleteMany: {
+          args: Prisma.DatasetDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.DatasetUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.DatasetUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetPayload>[]
+        }
+        upsert: {
+          args: Prisma.DatasetUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetPayload>
+        }
+        aggregate: {
+          args: Prisma.DatasetAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateDataset>
+        }
+        groupBy: {
+          args: Prisma.DatasetGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.DatasetGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.DatasetCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.DatasetCountAggregateOutputType> | number
+        }
+      }
+    }
+    DatasetContext: {
+      payload: Prisma.$DatasetContextPayload<ExtArgs>
+      fields: Prisma.DatasetContextFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.DatasetContextFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetContextPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.DatasetContextFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetContextPayload>
+        }
+        findFirst: {
+          args: Prisma.DatasetContextFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetContextPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.DatasetContextFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetContextPayload>
+        }
+        findMany: {
+          args: Prisma.DatasetContextFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetContextPayload>[]
+        }
+        create: {
+          args: Prisma.DatasetContextCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetContextPayload>
+        }
+        createMany: {
+          args: Prisma.DatasetContextCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.DatasetContextCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetContextPayload>[]
+        }
+        delete: {
+          args: Prisma.DatasetContextDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetContextPayload>
+        }
+        update: {
+          args: Prisma.DatasetContextUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetContextPayload>
+        }
+        deleteMany: {
+          args: Prisma.DatasetContextDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.DatasetContextUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.DatasetContextUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetContextPayload>[]
+        }
+        upsert: {
+          args: Prisma.DatasetContextUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$DatasetContextPayload>
+        }
+        aggregate: {
+          args: Prisma.DatasetContextAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateDatasetContext>
+        }
+        groupBy: {
+          args: Prisma.DatasetContextGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.DatasetContextGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.DatasetContextCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.DatasetContextCountAggregateOutputType> | number
+        }
+      }
+    }
+  }
 } & {
   other: {
     payload: any
@@ -455,7 +605,160 @@ export const TransactionIsolationLevel = runtime.makeStrictEnum({
 export type TransactionIsolationLevel = (typeof TransactionIsolationLevel)[keyof typeof TransactionIsolationLevel]
 
 
+export const DatasetScalarFieldEnum = {
+  id: 'id',
+  fileName: 'fileName',
+  tableName: 'tableName',
+  rowCount: 'rowCount',
+  columns: 'columns',
+  status: 'status',
+  error: 'error',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
 
+export type DatasetScalarFieldEnum = (typeof DatasetScalarFieldEnum)[keyof typeof DatasetScalarFieldEnum]
+
+
+export const DatasetContextScalarFieldEnum = {
+  id: 'id',
+  datasetId: 'datasetId',
+  context: 'context',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type DatasetContextScalarFieldEnum = (typeof DatasetContextScalarFieldEnum)[keyof typeof DatasetContextScalarFieldEnum]
+
+
+export const SortOrder = {
+  asc: 'asc',
+  desc: 'desc'
+} as const
+
+export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder]
+
+
+export const JsonNullValueInput = {
+  JsonNull: JsonNull
+} as const
+
+export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
+
+
+export const QueryMode = {
+  default: 'default',
+  insensitive: 'insensitive'
+} as const
+
+export type QueryMode = (typeof QueryMode)[keyof typeof QueryMode]
+
+
+export const JsonNullValueFilter = {
+  DbNull: DbNull,
+  JsonNull: JsonNull,
+  AnyNull: AnyNull
+} as const
+
+export type JsonNullValueFilter = (typeof JsonNullValueFilter)[keyof typeof JsonNullValueFilter]
+
+
+export const NullsOrder = {
+  first: 'first',
+  last: 'last'
+} as const
+
+export type NullsOrder = (typeof NullsOrder)[keyof typeof NullsOrder]
+
+
+
+/**
+ * Field references
+ */
+
+
+/**
+ * Reference to a field of type 'String'
+ */
+export type StringFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'String'>
+    
+
+
+/**
+ * Reference to a field of type 'String[]'
+ */
+export type ListStringFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'String[]'>
+    
+
+
+/**
+ * Reference to a field of type 'Int'
+ */
+export type IntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Int'>
+    
+
+
+/**
+ * Reference to a field of type 'Int[]'
+ */
+export type ListIntFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Int[]'>
+    
+
+
+/**
+ * Reference to a field of type 'Json'
+ */
+export type JsonFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Json'>
+    
+
+
+/**
+ * Reference to a field of type 'QueryMode'
+ */
+export type EnumQueryModeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'QueryMode'>
+    
+
+
+/**
+ * Reference to a field of type 'DatasetStatus'
+ */
+export type EnumDatasetStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DatasetStatus'>
+    
+
+
+/**
+ * Reference to a field of type 'DatasetStatus[]'
+ */
+export type ListEnumDatasetStatusFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DatasetStatus[]'>
+    
+
+
+/**
+ * Reference to a field of type 'DateTime'
+ */
+export type DateTimeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DateTime'>
+    
+
+
+/**
+ * Reference to a field of type 'DateTime[]'
+ */
+export type ListDateTimeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DateTime[]'>
+    
+
+
+/**
+ * Reference to a field of type 'Float'
+ */
+export type FloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float'>
+    
+
+
+/**
+ * Reference to a field of type 'Float[]'
+ */
+export type ListFloatFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'Float[]'>
+    
 
 /**
  * Batch Payload for updateMany & deleteMany & createMany
@@ -607,7 +910,10 @@ export interface PrismaClientOptionsWithAdapter extends PrismaClientBaseOptions 
  * Learn more about driver adapters: https://pris.ly/d/driver-adapters
  */
 export type PrismaClientOptions = PrismaClientOptionsWithAccelerateUrl | PrismaClientOptionsWithAdapter
-export type GlobalOmitConfig = {}
+export type GlobalOmitConfig = {
+  dataset?: Prisma.DatasetOmit
+  datasetContext?: Prisma.DatasetContextOmit
+}
 
 /* Types for Logging */
 export type LogLevel = 'info' | 'query' | 'warn' | 'error'
