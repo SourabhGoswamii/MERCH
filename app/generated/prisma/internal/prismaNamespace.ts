@@ -398,7 +398,8 @@ type FieldRefInputType<Model, FieldType> = Model extends never ? never : FieldRe
 
 export const ModelName = {
   Dataset: 'Dataset',
-  DatasetContext: 'DatasetContext'
+  DatasetContext: 'DatasetContext',
+  LogbookEntry: 'LogbookEntry'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -414,7 +415,7 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
     omit: GlobalOmitOptions
   }
   meta: {
-    modelProps: "dataset" | "datasetContext"
+    modelProps: "dataset" | "datasetContext" | "logbookEntry"
     txIsolationLevel: TransactionIsolationLevel
   }
   model: {
@@ -566,6 +567,80 @@ export type TypeMap<ExtArgs extends runtime.Types.Extensions.InternalArgs = runt
         }
       }
     }
+    LogbookEntry: {
+      payload: Prisma.$LogbookEntryPayload<ExtArgs>
+      fields: Prisma.LogbookEntryFieldRefs
+      operations: {
+        findUnique: {
+          args: Prisma.LogbookEntryFindUniqueArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LogbookEntryPayload> | null
+        }
+        findUniqueOrThrow: {
+          args: Prisma.LogbookEntryFindUniqueOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LogbookEntryPayload>
+        }
+        findFirst: {
+          args: Prisma.LogbookEntryFindFirstArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LogbookEntryPayload> | null
+        }
+        findFirstOrThrow: {
+          args: Prisma.LogbookEntryFindFirstOrThrowArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LogbookEntryPayload>
+        }
+        findMany: {
+          args: Prisma.LogbookEntryFindManyArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LogbookEntryPayload>[]
+        }
+        create: {
+          args: Prisma.LogbookEntryCreateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LogbookEntryPayload>
+        }
+        createMany: {
+          args: Prisma.LogbookEntryCreateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        createManyAndReturn: {
+          args: Prisma.LogbookEntryCreateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LogbookEntryPayload>[]
+        }
+        delete: {
+          args: Prisma.LogbookEntryDeleteArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LogbookEntryPayload>
+        }
+        update: {
+          args: Prisma.LogbookEntryUpdateArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LogbookEntryPayload>
+        }
+        deleteMany: {
+          args: Prisma.LogbookEntryDeleteManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateMany: {
+          args: Prisma.LogbookEntryUpdateManyArgs<ExtArgs>
+          result: BatchPayload
+        }
+        updateManyAndReturn: {
+          args: Prisma.LogbookEntryUpdateManyAndReturnArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LogbookEntryPayload>[]
+        }
+        upsert: {
+          args: Prisma.LogbookEntryUpsertArgs<ExtArgs>
+          result: runtime.Types.Utils.PayloadToResult<Prisma.$LogbookEntryPayload>
+        }
+        aggregate: {
+          args: Prisma.LogbookEntryAggregateArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.AggregateLogbookEntry>
+        }
+        groupBy: {
+          args: Prisma.LogbookEntryGroupByArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.LogbookEntryGroupByOutputType>[]
+        }
+        count: {
+          args: Prisma.LogbookEntryCountArgs<ExtArgs>
+          result: runtime.Types.Utils.Optional<Prisma.LogbookEntryCountAggregateOutputType> | number
+        }
+      }
+    }
   }
 } & {
   other: {
@@ -631,6 +706,20 @@ export const DatasetContextScalarFieldEnum = {
 export type DatasetContextScalarFieldEnum = (typeof DatasetContextScalarFieldEnum)[keyof typeof DatasetContextScalarFieldEnum]
 
 
+export const LogbookEntryScalarFieldEnum = {
+  id: 'id',
+  type: 'type',
+  title: 'title',
+  summary: 'summary',
+  evidence: 'evidence',
+  datasetIds: 'datasetIds',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type LogbookEntryScalarFieldEnum = (typeof LogbookEntryScalarFieldEnum)[keyof typeof LogbookEntryScalarFieldEnum]
+
+
 export const SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -644,6 +733,14 @@ export const JsonNullValueInput = {
 } as const
 
 export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
+
+
+export const NullableJsonNullValueInput = {
+  DbNull: DbNull,
+  JsonNull: JsonNull
+} as const
+
+export type NullableJsonNullValueInput = (typeof NullableJsonNullValueInput)[keyof typeof NullableJsonNullValueInput]
 
 
 export const QueryMode = {
@@ -744,6 +841,20 @@ export type DateTimeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel
  * Reference to a field of type 'DateTime[]'
  */
 export type ListDateTimeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'DateTime[]'>
+    
+
+
+/**
+ * Reference to a field of type 'LogbookEntryType'
+ */
+export type EnumLogbookEntryTypeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'LogbookEntryType'>
+    
+
+
+/**
+ * Reference to a field of type 'LogbookEntryType[]'
+ */
+export type ListEnumLogbookEntryTypeFieldRefInput<$PrismaModel> = FieldRefInputType<$PrismaModel, 'LogbookEntryType[]'>
     
 
 
@@ -913,6 +1024,7 @@ export type PrismaClientOptions = PrismaClientOptionsWithAccelerateUrl | PrismaC
 export type GlobalOmitConfig = {
   dataset?: Prisma.DatasetOmit
   datasetContext?: Prisma.DatasetContextOmit
+  logbookEntry?: Prisma.LogbookEntryOmit
 }
 
 /* Types for Logging */

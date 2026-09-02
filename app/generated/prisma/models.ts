@@ -10,4 +10,5 @@
  */
 export type * from './models/Dataset'
 export type * from './models/DatasetContext'
+export type * from './models/LogbookEntry'
 export type * from './commonInputTypes'

@@ -39,3 +39,24 @@ model DatasetContext {
 
   @@map("dataset_context")
 }
+enum LogbookEntryType {
+  ANALYSIS
+  INSIGHT
+  DECISION
+  RESEARCH
+}
+
+model LogbookEntry {
+  id         String          @id @default(uuid())
+  type       LogbookEntryType
+  title      String
+  summary    String
+  evidence   Json?
+  datasetIds Json?
+  createdAt  DateTime        @default(now()) @map("created_at")
+  updatedAt  DateTime        @updatedAt @map("updated_at")
+
+  @@index([createdAt])
+  @@index([type])
+  @@map("logbook_entries")
+}

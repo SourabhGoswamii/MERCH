@@ -51,3 +51,8 @@ export type Dataset = Prisma.DatasetModel
  * 
  */
 export type DatasetContext = Prisma.DatasetContextModel
+/**
+ * Model LogbookEntry
+ * 
+ */
+export type LogbookEntry = Prisma.LogbookEntryModel

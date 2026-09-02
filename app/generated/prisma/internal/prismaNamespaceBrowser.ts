@@ -52,7 +52,8 @@ export const AnyNull = runtime.AnyNull
 
 export const ModelName = {
   Dataset: 'Dataset',
-  DatasetContext: 'DatasetContext'
+  DatasetContext: 'DatasetContext',
+  LogbookEntry: 'LogbookEntry'
 } as const
 
 export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -97,6 +98,20 @@ export const DatasetContextScalarFieldEnum = {
 export type DatasetContextScalarFieldEnum = (typeof DatasetContextScalarFieldEnum)[keyof typeof DatasetContextScalarFieldEnum]
 
 
+export const LogbookEntryScalarFieldEnum = {
+  id: 'id',
+  type: 'type',
+  title: 'title',
+  summary: 'summary',
+  evidence: 'evidence',
+  datasetIds: 'datasetIds',
+  createdAt: 'createdAt',
+  updatedAt: 'updatedAt'
+} as const
+
+export type LogbookEntryScalarFieldEnum = (typeof LogbookEntryScalarFieldEnum)[keyof typeof LogbookEntryScalarFieldEnum]
+
+
 export const SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -110,6 +125,14 @@ export const JsonNullValueInput = {
 } as const
 
 export type JsonNullValueInput = (typeof JsonNullValueInput)[keyof typeof JsonNullValueInput]
+
+
+export const NullableJsonNullValueInput = {
+  DbNull: DbNull,
+  JsonNull: JsonNull
+} as const
+
+export type NullableJsonNullValueInput = (typeof NullableJsonNullValueInput)[keyof typeof NullableJsonNullValueInput]
 
 
 export const QueryMode = {

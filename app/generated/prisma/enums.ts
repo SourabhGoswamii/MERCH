@@ -17,3 +17,13 @@ export const DatasetStatus = {
 } as const
 
 export type DatasetStatus = (typeof DatasetStatus)[keyof typeof DatasetStatus]
+
+
+export const LogbookEntryType = {
+  ANALYSIS: 'ANALYSIS',
+  INSIGHT: 'INSIGHT',
+  DECISION: 'DECISION',
+  RESEARCH: 'RESEARCH'
+} as const
+
+export type LogbookEntryType = (typeof LogbookEntryType)[keyof typeof LogbookEntryType]
