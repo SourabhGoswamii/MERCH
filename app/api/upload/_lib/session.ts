@@ -266,7 +266,7 @@ export async function assembleAndIngest(sessionId: string): Promise<{
       where: { id: dataset.id },
       data: {
         rowCount: rows.length,
-        status: DatasetStatus.ANALYZING,
+        status: DatasetStatus.UPLOADING,
       },
     });
     emit(sessionId, {

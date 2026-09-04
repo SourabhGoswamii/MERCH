@@ -9,6 +9,9 @@ if (!connectionString) {
 
 const adapter = new PrismaPg({
   connectionString,
+  connectionLimit: Number(process.env.DATABASE_POOL_SIZE ?? 10),
+  connectionTimeoutMillis: 10_000,
+  idleTimeoutMillis: 30_000,
 });
 
 const globalForPrisma = globalThis as unknown as {
@@ -19,6 +22,10 @@ export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
     adapter,
+    transactionOptions: {
+      maxWait: 5_000,
+      timeout: 10_000,
+    },
   });
 
 if (process.env.NODE_ENV !== "production") {

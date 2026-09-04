@@ -87,7 +87,7 @@ export default function AuditLog() {
         title={`Audit log — ${events.length} events`}
         style={{
           position: "fixed",
-          top: 16,
+          bottom: 16,
           right: 16,
           zIndex: 80,
           height: 36,
@@ -144,18 +144,20 @@ export default function AuditLog() {
           aria-label="Audit log"
           style={{
             position: "fixed",
-            top: 0,
-            right: 0,
-            bottom: 0,
+            top: 16,
+            right: 16,
+            bottom: 72,
             width: "min(420px, 100vw)",
             zIndex: 90,
             background: "var(--surface)",
-            borderLeft: "1px solid var(--line)",
-            boxShadow: "-20px 0 60px -20px rgba(31,35,29,.25)",
+            border: "1px solid var(--line)",
+            borderRadius: "var(--radius-xl)",
+            boxShadow: "-20px 0 60px -20px rgba(31,35,29,.25), 0 24px 48px -16px rgba(31,35,29,.25)",
             display: "flex",
             flexDirection: "column",
             font: "400 13px/1.5 var(--sans)",
             color: "var(--ink)",
+            overflow: "hidden",
           }}
         >
           <style

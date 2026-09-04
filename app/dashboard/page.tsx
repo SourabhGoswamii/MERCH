@@ -1,16 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { runAgentStream } from "@/lib/agentClient";
 
 type Column = { original: string; name: string; type: string };
+
 type SemanticContext = {
   entity?: string;
   description?: string;
   columns?: Record<string, string>;
 };
+
 type Insight = {
   title: string;
   summary: string;
@@ -18,6 +20,7 @@ type Insight = {
   evidence?: string[];
   recommendedAction?: string;
 };
+
 type Dataset = {
   id: string;
   fileName: string;
@@ -29,6 +32,13 @@ type Dataset = {
   context?: { context: SemanticContext } | null;
 };
 
+type AgentSection = {
+  id: string;
+  title: string;
+  body: string;
+  kind: "finding" | "evidence" | "action" | "roadmap" | "research" | "other";
+};
+
 const statusLabel: Record<Dataset["status"], string> = {
   UPLOADING: "Uploading",
   ANALYZING: "Understanding",
@@ -36,28 +46,109 @@ const statusLabel: Record<Dataset["status"], string> = {
   FAILED: "Needs attention",
 };
 
+const MAX_CARD_CHARS = 330;
+
+function parseAgentSections(text: string): AgentSection[] {
+  if (!text?.trim()) return [];
+
+  const normalized = text.replace(/\r\n/g, "\n").trim();
+  const matches = [
+    ...normalized.matchAll(
+      /(?:^|\n)\s*#{1,6}\s*([^\n#]+?)\s*(?=\n|$)/g,
+    ),
+  ];
+
+  if (!matches.length) {
+    return [
+      {
+        id: "response",
+        title: "MerchMind response",
+        body: normalized,
+        kind: "other",
+      },
+    ];
+  }
+
+  const sections: AgentSection[] = [];
+
+  matches.forEach((match, index) => {
+    const title = match[1].trim();
+    const start = (match.index ?? 0) + match[0].length;
+    const end = index + 1 < matches.length ? matches[index + 1].index ?? normalized.length : normalized.length;
+    const body = normalized.slice(start, end).trim();
+
+    if (!body) return;
+
+    const lower = title.toLowerCase();
+    let kind: AgentSection["kind"] = "other";
+    if (lower.includes("finding") || lower.includes("insight") || lower.includes("signal")) kind = "finding";
+    else if (lower.includes("evidence") || lower.includes("data") || lower.includes("why")) kind = "evidence";
+    else if (lower.includes("recommend") || lower.includes("next") || lower.includes("action") || lower.includes("tip")) kind = "action";
+    else if (lower.includes("roadmap") || lower.includes("plan")) kind = "roadmap";
+    else if (lower.includes("research") || lower.includes("market")) kind = "research";
+
+    sections.push({
+      id: `${index}-${title}`,
+      title,
+      body,
+      kind,
+    });
+  });
+
+  return sections.length
+    ? sections
+    : [
+        {
+          id: "response",
+          title: "MerchMind response",
+          body: normalized,
+          kind: "other",
+        },
+      ];
+}
+
+function compactText(text: string) {
+  if (text.length <= MAX_CARD_CHARS) {
+    return { text, truncated: false };
+  }
+
+  return {
+    text: `${text.slice(0, MAX_CARD_CHARS).trimEnd()}…`,
+    truncated: true,
+  };
+}
+
 export default function DashboardPage() {
   const router = useRouter();
+
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailsId, setDetailsId] = useState<string | null>(null);
+
   const [loading, setLoading] = useState(true);
+  const [agentLoading, setAgentLoading] = useState(false);
   const [agentRequest, setAgentRequest] = useState("");
   const [agentMessage, setAgentMessage] = useState("");
-  const [insights, setInsights] = useState<Insight[]>([]);
-  const [agentLoading, setAgentLoading] = useState(false);
+  const [latestMode, setLatestMode] = useState<"initial_analysis" | "chat" | null>(null);
+  const [logbookEntries, setLogbookEntries] = useState<string[]>([]);
+  const [logbookPrompt, setLogbookPrompt] = useState(false);
+
+  const initialRunRef = useRef(false);
 
   const loadDatasets = useCallback(async () => {
     try {
       const response = await fetch("/api/datasets", { cache: "no-store" });
       const data = await response.json();
-      if (!response.ok)
+
+      if (!response.ok) {
         throw new Error(data.error ?? "Could not load datasets");
+      }
+
       setDatasets(data.datasets);
       setSelectedId((current) =>
-        current &&
-        data.datasets.some((dataset: Dataset) => dataset.id === current)
+        current && data.datasets.some((dataset: Dataset) => dataset.id === current)
           ? current
-          : (data.datasets[0]?.id ?? null),
+          : data.datasets[0]?.id ?? null,
       );
     } catch (error) {
       console.error(error);
@@ -70,98 +161,217 @@ export default function DashboardPage() {
     const timer = window.setTimeout(() => void loadDatasets(), 0);
     return () => window.clearTimeout(timer);
   }, [loadDatasets]);
+
   useEffect(() => {
-    if (
-      !datasets.some(
-        (dataset) =>
-          dataset.status === "ANALYZING" || dataset.status === "UPLOADING",
-      )
-    )
-      return;
-    const timer = window.setInterval(() => void loadDatasets(), 5000);
+    const working = datasets.some(
+      (dataset) =>
+        dataset.status === "ANALYZING" || dataset.status === "UPLOADING",
+    );
+
+    if (!working) return;
+
+    const timer = window.setInterval(() => void loadDatasets(), 4000);
     return () => window.clearInterval(timer);
   }, [datasets, loadDatasets]);
 
+  const readyDatasets = useMemo(
+    () => datasets.filter((dataset) => dataset.status === "READY"),
+    [datasets],
+  );
+
   const selected =
     datasets.find((dataset) => dataset.id === selectedId) ?? null;
-  const readyDatasets = datasets.filter(
-    (dataset) => dataset.status === "READY",
-  );
+
+  const detailsDataset =
+    datasets.find((dataset) => dataset.id === detailsId) ?? null;
+
   const totalRows = datasets.reduce(
     (total, dataset) => total + dataset.rowCount,
     0,
   );
 
+  const sections = useMemo(
+    () => parseAgentSections(agentMessage),
+    [agentMessage],
+  );
+
+  /*
+   * The agent receives ALL READY datasets.
+   * There is intentionally no "select dataset as context" state.
+   */
   async function runAgent(mode: "initial_analysis" | "chat") {
     if (!readyDatasets.length || agentLoading) return;
+
+    const message = mode === "chat" ? agentRequest.trim() : undefined;
+    if (mode === "chat" && !message) return;
+
     setAgentLoading(true);
+
     try {
       const data = await runAgentStream({
         mode,
-        message: mode === "chat" ? agentRequest : undefined,
+        message,
       });
-      setAgentMessage(data.response);
-      setInsights(data.insights ?? []);
-      if (mode === "chat") setAgentRequest("");
+
+      setAgentMessage(data.response ?? "");
+      setLatestMode(mode);
+
+      if (mode === "chat") {
+        setAgentRequest("");
+        setLogbookPrompt(true);
+      } else {
+        setLogbookPrompt(false);
+      }
     } catch (error) {
       setAgentMessage(
-        error instanceof Error ? error.message : "The agent could not run.",
+        error instanceof Error
+          ? error.message
+          : "MerchMind could not complete the analysis.",
       );
+      setLatestMode(mode);
     } finally {
       setAgentLoading(false);
     }
   }
 
+  /*
+   * Automatically analyse the shared workspace once the first READY dataset
+   * exists. Re-analysis resets this guard through a full page state update.
+   */
+  useEffect(() => {
+    if (!readyDatasets.length || initialRunRef.current || agentLoading) return;
+
+    initialRunRef.current = true;
+    void runAgent("initial_analysis");
+    // Intentionally only reacts to readiness of the shared workspace.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readyDatasets.length]);
+
+  async function reanalyse(dataset: Dataset) {
+    if (dataset.status === "ANALYZING" || dataset.status === "UPLOADING") return;
+
+    setAgentMessage("");
+    setLatestMode(null);
+    setLogbookPrompt(false);
+
+    setDatasets((current) =>
+      current.map((item) =>
+        item.id === dataset.id
+          ? { ...item, status: "ANALYZING", error: null }
+          : item,
+      ),
+    );
+
+    try {
+      const response = await fetch(
+        `/api/datasets/${dataset.id}/analyze?force=true`,
+        {
+          method: "POST",
+          cache: "no-store",
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Re-analysis failed");
+      }
+
+      await loadDatasets();
+
+      /*
+       * Give the shared agent a fresh pass after this dataset has been
+       * re-analysed. The agent still sees every READY dataset.
+       */
+      initialRunRef.current = true;
+      await runAgent("initial_analysis");
+    } catch (error) {
+      setAgentMessage(
+        error instanceof Error ? error.message : "Re-analysis failed.",
+      );
+      await loadDatasets();
+    }
+  }
+
+  function addToLogbook() {
+    if (!agentMessage.trim()) return;
+
+    setLogbookEntries((entries) => [
+      ...entries,
+      agentMessage.trim(),
+    ]);
+    setLogbookPrompt(false);
+  }
+
   return (
-    <main className="min-h-screen bg-[var(--paper)] text-[var(--ink)]">
-      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-[var(--line)] bg-[rgba(245,243,237,.85)] px-6 backdrop-blur-md">
+    <main className="dash-page min-h-screen bg-[var(--paper)] text-[var(--ink)]">
+      {/* =====================================================
+          HEADER — brand · Audit LOG · reupload
+      ===================================================== */}
+
+      <header className="dash-header">
         <button
           type="button"
           onClick={() => router.push("/")}
-          className="flex items-center gap-2 border-0 bg-transparent text-[var(--sage-deep)] cursor-pointer"
+          className="dash-brand"
         >
           <svg className="h-6 w-6" viewBox="0 0 26 26" aria-hidden="true">
-            <circle cx="13" cy="13" r="11.2" fill="none" stroke="currentColor" strokeWidth="1.4" opacity=".5" />
-            <path d="M13 6.6 7.4 16.2M13 6.6l5.6 9.6M7.4 16.2h11.2" stroke="currentColor" strokeWidth="1.1" fill="none" opacity=".8" />
+            <circle
+              cx="13"
+              cy="13"
+              r="11.2"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              opacity=".5"
+            />
+            <path
+              d="M13 6.6 7.4 16.2M13 6.6l5.6 9.6M7.4 16.2h11.2"
+              stroke="currentColor"
+              strokeWidth="1.1"
+              fill="none"
+              opacity=".8"
+            />
             <circle cx="13" cy="6.6" r="2.1" fill="currentColor" />
             <circle cx="7.4" cy="16.2" r="2.1" fill="currentColor" />
             <circle cx="18.6" cy="16.2" r="2.1" fill="currentColor" />
           </svg>
           <span className="serif text-lg font-medium">MerchMind</span>
-          <span className="mono ml-2 text-[10px] tracking-[.14em] text-[var(--ink-3)]">
+          <span className="mono ml-2 hidden text-[10px] tracking-[.14em] text-[var(--ink-3)] sm:inline">
             / workspace
           </span>
         </button>
-        <div className="flex items-center gap-3">
-          <span className="mono hidden text-[10.5px] tracking-[.14em] text-[var(--ink-3)] sm:inline">
+
+        <div className="dash-header-actions">
+          <span className="mono hidden text-[10px] tracking-[.14em] text-[var(--ink-3)] lg:inline">
             STEP 02 OF 03 · AI GROWTH
           </span>
-          <button
-            type="button"
-            onClick={() => router.push("/upload")}
-            className="btn btn-primary btn-small cursor-pointer"
-          >
-            + Add data
-          </button>
+
         </div>
       </header>
 
       <div className="dash-shell">
+        {/* =====================================================
+            LEFT — permanent shared dataset context
+        ===================================================== */}
+
         <aside className="dash-rail-left" aria-label="Datasets">
           <div className="rail-head">
             <span className="rail-title">Datasets</span>
             <span className="rail-count">{datasets.length}</span>
           </div>
 
+          <p className="rail-note">
+            Every uploaded CSV becomes part of the shared agent context.
+          </p>
+
           {loading && (
-            <p className="text-sm text-[var(--ink-3)]">Loading workspace…</p>
+            <p className="rail-loading">Loading workspace…</p>
           )}
+
           {!loading && datasets.length === 0 && (
-            <div
-              className="rounded-lg border border-dashed border-[var(--line-2)] bg-[var(--surface-2)] p-4 text-sm text-[var(--ink-2)]"
-              style={{ lineHeight: 1.55 }}
-            >
-              No datasets yet. Drop a CSV to get started.
+            <div className="rail-empty">
+              No datasets yet. Add a CSV to begin.
             </div>
           )}
 
@@ -174,25 +384,57 @@ export default function DashboardPage() {
                   : dataset.status === "FAILED"
                     ? "failed"
                     : "working";
+
               return (
                 <li key={dataset.id}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(dataset.id)}
-                    aria-current={active}
-                    className="dataset-item"
-                  >
-                    <span className="name">{dataset.fileName}</span>
-                    <span className="meta">
-                      <span>{dataset.rowCount.toLocaleString()} rows</span>
-                      <span className="sep" />
-                      <span>{dataset.columns.length} cols</span>
-                    </span>
+                  <div className={`dataset-item ${active ? "active" : ""}`}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(dataset.id)}
+                      className="dataset-select"
+                      title={`Use ${dataset.fileName} in the inspector`}
+                    >
+                      <span className="name block truncate">
+                        {dataset.fileName}
+                      </span>
+
+                      <span className="meta">
+                        <span>{dataset.rowCount.toLocaleString()} rows</span>
+                        <span className="sep" />
+                        <span>{dataset.columns.length} cols</span>
+                      </span>
+                    </button>
+
                     <span className={`dataset-status ${statusKey}`}>
                       <span className="dot" aria-hidden="true" />
                       {statusLabel[dataset.status]}
                     </span>
-                  </button>
+
+                    <div className="dataset-actions">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedId(dataset.id);
+                          setDetailsId(dataset.id);
+                        }}
+                        className="dataset-action"
+                      >
+                        Details
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => void reanalyse(dataset)}
+                        disabled={
+                          dataset.status === "ANALYZING" ||
+                          dataset.status === "UPLOADING"
+                        }
+                        className="dataset-action"
+                      >
+                        Re-analyse
+                      </button>
+                    </div>
+                  </div>
                 </li>
               );
             })}
@@ -203,192 +445,1841 @@ export default function DashboardPage() {
             onClick={() => router.push("/upload")}
             className="add-csv"
           >
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+            <svg
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            >
               <path d="M8 3.5v9M3.5 8h9" />
             </svg>
-            Add CSV
+            Add another CSV
           </button>
+
+          <div className="context-note">
+            <p className="context-note-label">Shared agent context</p>
+            <p className="context-note-text">
+              {readyDatasets.length} ready dataset
+              {readyDatasets.length === 1 ? "" : "s"} available to MerchMind.
+            </p>
+          </div>
         </aside>
 
+        {/* =====================================================
+            CENTER — the three sketch states
+        ===================================================== */}
+
         <section className="dash-main">
-          {datasets.length === 0 && !loading ? (
-            <EmptyState onUpload={() => router.push("/upload")} />
-          ) : (
-            <>
-              <div className="dash-hero">
+          <div className="dash-hero">
+            <div className="dash-hero-top">
+              <div>
                 <p className="kicker">AI Growth Strategist</p>
                 <h1 className="serif">
                   Your business, <em>understood</em>.
                 </h1>
-                <p>
-                  Your data lives in one shared workspace. Uploads, dashboard
-                  context, and the MerchMind agent all read the same source of
-                  truth.
-                </p>
               </div>
 
-              {selected && <DatasetWorkspace dataset={selected} />}
-
-              <div className="agent-card">
-                <div className="flex items-center justify-between">
-                  <p className="rail-title">MerchMind Agent</p>
-                  <span className="mono text-[10px] tracking-[.14em] text-[var(--sage-deep)]">
-                    READ-ONLY
-                  </span>
-                </div>
-                {agentMessage && <p className="agent-reply">{agentMessage}</p>}
-                <div className="agent-input">
-                  <input
-                    value={agentRequest}
-                    onChange={(event) => setAgentRequest(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") void runAgent("chat");
-                    }}
-                    disabled={!readyDatasets.length || agentLoading}
-                    placeholder={
-                      readyDatasets.length
-                        ? "Ask anything about your business…"
-                        : "Your agent unlocks when a dataset is ready…"
-                    }
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void runAgent("chat")}
-                    disabled={
-                      !readyDatasets.length ||
-                      !agentRequest.trim() ||
-                      agentLoading
-                    }
-                    className="btn btn-primary btn-small cursor-pointer"
-                  >
-                    {agentLoading ? "Thinking…" : "Ask"}
-                  </button>
-                </div>
-                <p className="mono text-center text-[10px] tracking-[.12em] text-[var(--ink-3)]">
-                  USES ANALYZED DATA · REGISTERED READ-ONLY TOOLS
-                </p>
-              </div>
-            </>
-          )}
-        </section>
-
-        <aside className="dash-rail-right" aria-label="Intelligence">
-          <div>
-            <div className="rail-head">
-              <span className="rail-title">This session</span>
-              <span className="mono text-[10px] tracking-[.14em] text-[var(--ink-3)]">
-                LIVE
-              </span>
+              <span className="hero-badge">ALL DATASETS</span>
             </div>
-            <div className="mt-4 flex flex-col gap-3">
-              <div className="metric-tile">
-                <span className="lbl">Datasets</span>
-                <span className="val">{datasets.length}</span>
-              </div>
-              <div className="metric-tile">
-                <span className="lbl">Total rows</span>
-                <span className="val">{totalRows.toLocaleString()}</span>
-              </div>
-              <div className="metric-tile">
-                <span className="lbl">AI context</span>
-                <span className="val small">
-                  {readyDatasets.length}/{datasets.length} ready
-                </span>
-              </div>
-            </div>
+
+            <p className="dash-hero-copy">
+              One shared context for your datasets, historical decisions, and
+              current market signals.
+            </p>
           </div>
 
-          <div className="section-block">
-            <span className="rail-title">Tips &amp; opportunities</span>
-            {readyDatasets.length ? (
-              <div className="flex flex-col gap-3">
-                {insights.length === 0 && (
-                  <div className="opp-card">
-                    <h3>Start your business analysis</h3>
-                    <p>
-                      Let MerchMind use your configured tools to look for
-                      sales-growth opportunities.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => void runAgent("initial_analysis")}
-                      disabled={agentLoading}
-                      className="btn btn-primary btn-small cursor-pointer"
-                      style={{ alignSelf: "flex-start" }}
-                    >
-                      {agentLoading ? "Analyzing…" : "Start analysis"}
-                    </button>
+          {/* ================================================
+              STATE 1 / STATE 2 — the signal stage
+          ================================================ */}
+
+          <section className="workspace-card state-card">
+            <div className="section-caption-row">
+              <div>
+                <span className="section-kicker">Today&apos;s signal</span>
+                <h2 className="serif section-title">
+                  {agentLoading
+                    ? "Research in progress"
+                    : sections.length
+                      ? "Tips to upscale"
+                      : "Intelligence"}
+                </h2>
+              </div>
+
+              <span className={`state-flag ${agentLoading ? "working" : ""}`}>
+                <span className="dot" aria-hidden="true" />
+                {agentLoading ? "Working" : "Updates"}
+              </span>
+            </div>
+
+            {/* STATE 1 — "agent is working on your dataset" */}
+
+            {agentLoading ? (
+              <div className="working-stage">
+                <div className="working-mark" aria-hidden="true">
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="26"
+                    height="26"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M5 3.5h9l5 5v12H5z" />
+                    <path d="M14 3.5V9h5" />
+                    <path d="m12.4 17.6 4.3-4.3 1.6 1.6-4.3 4.3-2 .4.4-2z" />
+                  </svg>
+                </div>
+
+                <div className="working-copy">
+                  <h3 className="serif">
+                    Agent is working on your dataset
+                  </h3>
+                  <p>
+                    It is reading the shared datasets and gathering relevant
+                    market context. Your first actionable signals will appear
+                    here when the research is complete.
+                  </p>
+
+                  <div className="working-ticks" aria-hidden="true">
+                    <i />
+                    <i />
+                    <i />
                   </div>
-                )}
-                {insights.map((insight) => (
-                  <article key={insight.title} className="insight">
-                    <header>
-                      <h4>{insight.title}</h4>
-                      <span className="conf">{insight.confidence}</span>
-                    </header>
-                    <p>{insight.summary}</p>
-                    {insight.recommendedAction && (
-                      <p className="action">→ {insight.recommendedAction}</p>
-                    )}
+                </div>
+              </div>
+            ) : sections.length ? (
+              /* STATE 2 — "tips to upscale" */
+
+              <div className="tip-grid">
+                {sections.slice(0, 3).map((section, index) => {
+                  const compact = compactText(section.body);
+
+                  return (
+                    <article
+                      key={section.id}
+                      className={`tip-card tip-${index + 1}`}
+                    >
+                      <span className="tip-no">
+                        TIP {String(index + 1).padStart(2, "0")}
+                      </span>
+
+                      <h3 className="serif">{section.title}</h3>
+                      <p>{compact.text}</p>
+
+                      {compact.truncated && (
+                        <button
+                          type="button"
+                          className="view-details"
+                          onClick={() =>
+                            setDetailsId(`agent:${section.id}`)
+                          }
+                        >
+                          View details →
+                        </button>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="empty-signal">
+                <span className="empty-glyph" aria-hidden="true">
+                  ⌁
+                </span>
+                <div>
+                  <strong>No actionable signal yet.</strong>
+                  <p>
+                    Ask MerchMind a specific business question below to start
+                    an investigation.
+                  </p>
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* ================================================
+              LOGBOOK — old entries
+          ================================================ */}
+
+          <section className="workspace-card logbook-card">
+            <div className="section-caption-row">
+              <div>
+                <span className="section-kicker">Persistent memory</span>
+                <h2 className="serif section-title">Log book</h2>
+              </div>
+              <span className="section-side">Old entry</span>
+            </div>
+
+            {logbookEntries.length ? (
+              <div className="logbook-list">
+                {logbookEntries.slice(-3).map((entry, index) => (
+                  <article key={`${entry}-${index}`} className="logbook-entry">
+                    <span className="logbook-index">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <p>{entry}</p>
                   </article>
                 ))}
               </div>
             ) : (
-              <div className="opp-card empty">
-                <h3>We&apos;re getting things ready.</h3>
+              <div className="logbook-empty">
+                <span className="logbook-index">01</span>
+                <div>
+                  <strong>No previous entries.</strong>
+                  <p>
+                    Important findings, decisions, and research from future
+                    investigations will appear here.
+                  </p>
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* ================================================
+              STATE 3 — agent search + answer
+          ================================================ */}
+
+          <section className="workspace-card agent-workspace">
+            <div className="section-caption-row">
+              <div>
+                <span className="section-kicker">Ask MerchMind</span>
+                <h2 className="serif section-title">Work with the agent.</h2>
+              </div>
+              <span className="section-side">
+                {readyDatasets.length} dataset · shared context
+              </span>
+            </div>
+
+            {agentMessage && !agentLoading && latestMode === "chat" ? (
+              <>
+                <div className="answer-stack">
+                  {sections.slice(0, 3).map((section, index) => {
+                    const compact = compactText(section.body);
+
+                    return (
+                      <article
+                        key={section.id}
+                        className={`answer-card ${
+                          index === 0 ? "lead" : ""
+                        } ${section.kind === "roadmap" ? "roadmap" : ""}`}
+                      >
+                        <span className="answer-kicker">
+                          {index === 0
+                            ? "MerchMind's answer"
+                            : section.kind === "roadmap"
+                              ? "Roadmap"
+                              : section.kind}
+                        </span>
+
+                        <h3 className="serif">{section.title}</h3>
+                        <p>{compact.text}</p>
+
+                        {compact.truncated && (
+                          <button
+                            type="button"
+                            className="view-details"
+                            onClick={() =>
+                              setDetailsId(`agent:${section.id}`)
+                            }
+                          >
+                            View details →
+                          </button>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+
+                {logbookPrompt && (
+                  <div className="logbook-question">
+                    <span>Can I enter this in the logbook?</span>
+                    <button type="button" onClick={addToLogbook}>
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLogbookPrompt(false)}
+                    >
+                      No
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="chat-placeholder">
                 <p>
-                  MerchMind is reading the structure of your data. We will not
-                  show made-up insights while that work is in progress.
+                  {agentLoading
+                    ? "MerchMind is working through your shared business context…"
+                    : readyDatasets.length
+                      ? "Ask a question about your business. MerchMind will use every uploaded ready dataset as context."
+                      : "Upload a CSV to unlock the shared business agent."}
                 </p>
               </div>
             )}
-          </div>
+
+            <div className="agent-input">
+              <span className="agent-input-label">Agent search</span>
+
+              <input
+                value={agentRequest}
+                onChange={(event) => setAgentRequest(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void runAgent("chat");
+                }}
+                disabled={!readyDatasets.length || agentLoading}
+                placeholder={
+                  readyDatasets.length
+                    ? "Ask MerchMind anything about your business…"
+                    : "Your agent unlocks when a dataset is ready…"
+                }
+              />
+
+              <button
+                type="button"
+                onClick={() => void runAgent("chat")}
+                disabled={
+                  !readyDatasets.length ||
+                  !agentRequest.trim() ||
+                  agentLoading
+                }
+                className="agent-send"
+                aria-label="Send message"
+              >
+                {agentLoading ? "…" : "→"}
+              </button>
+            </div>
+
+            <p className="agent-footnote">
+              MerchMind will read ALL ready datasets · research is used when
+              available
+            </p>
+          </section>
+        </section>
+
+        {/* =====================================================
+            RIGHT — only opens when a dataset is selected
+        ===================================================== */}
+
+        <aside
+          className="dash-rail-right dataset-inspector"
+          aria-label="Dataset inspector"
+        >
+          {selected ? (
+            <DatasetInspector dataset={selected} />
+          ) : (
+            <div className="inspector-empty">
+              <div className="inspector-icon">▤</div>
+              <span className="inspector-kicker">Dataset inspector</span>
+              <h2 className="serif">Explore a dataset.</h2>
+              <p>
+                Click <strong>Details</strong> under any CSV to inspect its
+                semantic context and data.
+              </p>
+              <span className="inspector-footnote">
+                The agent&apos;s context does not change
+              </span>
+            </div>
+          )}
         </aside>
       </div>
+
+      {/* =====================================================
+          MODALS — unchanged conditions
+      ===================================================== */}
+
+      {detailsId?.startsWith("agent:") && (
+        <AgentDetailsModal
+          sections={sections}
+          id={detailsId.slice("agent:".length)}
+          onClose={() => setDetailsId(null)}
+        />
+      )}
+
+      {detailsDataset && !detailsId?.startsWith("agent:") && (
+        <DatasetDetailsModal
+          dataset={detailsDataset}
+          onClose={() => setDetailsId(null)}
+        />
+      )}
+
+      <style jsx global>{`
+        /* ===============================================
+           PAGE — sketch paper
+        =============================================== */
+
+        .dash-page {
+          background-image:
+            radial-gradient(
+              rgba(70, 60, 45, 0.055) 1px,
+              transparent 1px
+            );
+          background-size: 24px 24px;
+        }
+
+        /* ===============================================
+           HEADER
+        =============================================== */
+
+        .dash-header {
+          position: sticky;
+          top: 0;
+          z-index: 40;
+
+          display: flex;
+          height: 64px;
+          align-items: center;
+          justify-content: space-between;
+
+          padding: 0 20px;
+
+          border-bottom: 1.5px solid var(--line-2);
+          background: rgba(245, 243, 237, 0.9);
+
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+        }
+
+        @media (min-width: 640px) {
+          .dash-header {
+            padding: 0 24px;
+          }
+        }
+
+        .dash-brand {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+
+          border: 0;
+          background: transparent;
+
+          color: var(--sage-deep);
+          cursor: pointer;
+          padding: 0;
+        }
+
+        .dash-header-actions {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .audit-link {
+          display: inline-flex;
+          align-items: center;
+
+          padding: 8px 13px;
+
+          border: 1.5px dashed var(--line-2);
+          border-radius: 10px 6px 11px 7px;
+
+          background: transparent;
+          color: var(--ink-2);
+
+          cursor: pointer;
+
+          font-family: var(--mono, monospace);
+          font-size: 8.5px;
+          letter-spacing: 0.13em;
+          text-transform: uppercase;
+
+          transition:
+            border-color 150ms ease,
+            color 150ms ease,
+            background 150ms ease;
+        }
+
+        .audit-link:hover {
+          border-color: var(--clay-deep);
+          color: var(--clay-deep);
+          background: rgba(255, 255, 255, 0.55);
+        }
+
+        /* ===============================================
+           SHELL
+        =============================================== */
+
+        .dash-shell {
+          display: grid;
+          grid-template-columns:
+            minmax(190px, 225px)
+            minmax(0, 1fr)
+            minmax(230px, 280px);
+
+          gap: 18px;
+
+          width: min(1240px, calc(100vw - 36px));
+          margin: 0 auto;
+          padding: 22px 0 42px;
+
+          align-items: start;
+        }
+
+        .dash-rail-left,
+        .dash-rail-right {
+          min-width: 0;
+        }
+
+        .dash-rail-left {
+          position: sticky;
+          top: 84px;
+        }
+
+        .dash-rail-right {
+          position: sticky;
+          top: 84px;
+          min-height: 360px;
+        }
+
+        .dash-main {
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+        }
+
+        /* ===============================================
+           HERO
+        =============================================== */
+
+        .dash-hero {
+          padding: 2px 4px 4px;
+        }
+
+        .dash-hero-top {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 12px;
+        }
+
+        .dash-hero h1 {
+          margin: 2px 0 8px;
+          font-size: clamp(30px, 3.2vw, 46px);
+          line-height: 0.98;
+          letter-spacing: -0.035em;
+        }
+
+        .dash-hero h1 em {
+          color: var(--clay-deep);
+        }
+
+        .hero-badge {
+          display: inline-flex;
+          align-items: center;
+
+          margin-top: 6px;
+          padding: 5px 10px;
+
+          border: 1px dashed var(--line-2);
+          border-radius: 999px;
+
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          letter-spacing: 0.13em;
+          color: var(--sage-deep);
+        }
+
+        .dash-hero-copy {
+          max-width: 620px;
+          margin: 0;
+          color: var(--ink-2);
+          font-size: 12px;
+          line-height: 1.55;
+        }
+
+        /* ===============================================
+           RAIL — datasets
+        =============================================== */
+
+        .rail-head,
+        .section-caption-row {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 10px;
+        }
+
+        .rail-title {
+          font-family: var(--serif, Georgia, serif);
+          font-size: 17px;
+          font-weight: 500;
+          line-height: 1.05;
+        }
+
+        .section-title {
+          margin: 3px 0 0;
+          font-size: 19px;
+          line-height: 1.05;
+          font-weight: 500;
+        }
+
+        .section-kicker,
+        .answer-kicker {
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          color: var(--clay-deep);
+        }
+
+        .section-side {
+          margin-top: 4px;
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          letter-spacing: 0.11em;
+          text-transform: uppercase;
+          color: var(--ink-3);
+        }
+
+        .rail-count {
+          display: inline-flex;
+          min-width: 20px;
+          height: 20px;
+          align-items: center;
+          justify-content: center;
+
+          border: 1px solid var(--line-2);
+          border-radius: 999px;
+
+          font-family: var(--mono, monospace);
+          font-size: 9px;
+          color: var(--ink-3);
+        }
+
+        .rail-note {
+          margin: 8px 0 12px;
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          line-height: 1.5;
+          letter-spacing: 0.05em;
+          color: var(--ink-3);
+        }
+
+        .rail-loading {
+          margin: 0;
+          font-size: 12px;
+          color: var(--ink-3);
+        }
+
+        .rail-empty {
+          padding: 12px;
+          border: 1.5px dashed var(--line-2);
+          border-radius: 11px 7px 12px 8px;
+          background: var(--surface-2, rgba(250, 248, 243, 0.7));
+          font-size: 11px;
+          line-height: 1.5;
+          color: var(--ink-2);
+        }
+
+        .dataset-list {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          margin: 0;
+          padding: 0;
+          list-style: none;
+        }
+
+        .dataset-item {
+          width: 100%;
+          padding: 10px;
+          border: 1.5px solid var(--line-2);
+          border-radius: 12px 8px 13px 9px;
+          background: rgba(255, 255, 255, 0.55);
+
+          box-shadow: 0 1px 0 rgba(40, 35, 28, 0.03);
+
+          transition:
+            border-color 150ms ease,
+            transform 150ms ease,
+            background 150ms ease;
+        }
+
+        .dataset-item:hover,
+        .dataset-item.active {
+          border-color: var(--clay-deep);
+          background: rgba(255, 255, 255, 0.8);
+        }
+
+        .dataset-item.active {
+          box-shadow: inset 3px 0 0 var(--clay-deep);
+        }
+
+        .dataset-select {
+          min-width: 0;
+          flex: 1;
+          border: 0;
+          background: transparent;
+          padding: 0;
+          text-align: left;
+          cursor: pointer;
+        }
+
+        .dataset-item .name {
+          font-size: 10.5px;
+          line-height: 1.3;
+          color: var(--ink);
+          font-weight: 500;
+        }
+
+        .dataset-item .meta {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          margin-top: 4px;
+          font-family: var(--mono, monospace);
+          font-size: 7.5px;
+          letter-spacing: 0.04em;
+          color: var(--ink-3);
+        }
+
+        .dataset-item .meta .sep {
+          width: 2px;
+          height: 2px;
+          border-radius: 50%;
+          background: currentColor;
+        }
+
+        .dataset-status {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          margin-top: 6px;
+
+          font-family: var(--mono, monospace);
+          font-size: 7px;
+          text-transform: uppercase;
+          letter-spacing: 0.07em;
+        }
+
+        .dataset-status .dot {
+          width: 5px;
+          height: 5px;
+          border-radius: 50%;
+          background: currentColor;
+        }
+
+        .dataset-status.ready { color: var(--sage-deep); }
+        .dataset-status.working { color: #a18b65; }
+        .dataset-status.failed { color: var(--clay-deep); }
+
+        .dataset-actions {
+          display: flex;
+          gap: 6px;
+          margin-top: 10px;
+        }
+
+        .dataset-action {
+          flex: 1;
+          min-width: 0;
+          padding: 5px 6px;
+
+          border: 1px solid var(--line-2);
+          border-radius: 999px;
+
+          background: var(--paper);
+          color: var(--ink-2);
+
+          cursor: pointer;
+
+          font-family: var(--mono, monospace);
+          font-size: 7.5px;
+          line-height: 1;
+          text-transform: lowercase;
+
+          transition:
+            border-color 150ms ease,
+            color 150ms ease,
+            background 150ms ease;
+        }
+
+        .dataset-action:hover {
+          border-color: var(--clay-deep);
+          color: var(--clay-deep);
+          background: rgba(255, 255, 255, 0.7);
+        }
+
+        .dataset-action:disabled {
+          cursor: not-allowed;
+          opacity: 0.5;
+        }
+
+        .add-csv {
+          display: flex;
+          width: 100%;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+
+          margin-top: 12px;
+          padding: 9px 10px;
+
+          border: 1.5px dashed var(--clay-deep);
+          border-radius: 999px;
+
+          background: transparent;
+          color: var(--clay-deep);
+
+          cursor: pointer;
+
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          letter-spacing: 0.06em;
+
+          transition: background 150ms ease;
+        }
+
+        .add-csv:hover {
+          background: rgba(255, 255, 255, 0.5);
+        }
+
+        .context-note {
+          margin-top: 12px;
+          padding: 12px;
+          border-radius: 11px 7px 12px 8px;
+          background: rgba(217, 226, 207, 0.45);
+          border: 1px dashed var(--line-2);
+        }
+
+        .context-note-label {
+          margin: 0;
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          color: var(--sage-deep);
+        }
+
+        .context-note-text {
+          margin: 5px 0 0;
+          font-size: 10px;
+          line-height: 1.45;
+          color: var(--ink-2);
+        }
+
+        /* ===============================================
+           WORKSPACE CARDS — sketchy white panels
+        =============================================== */
+
+        .workspace-card {
+          overflow: hidden;
+          padding: 16px;
+
+          border: 1.5px solid var(--line-2);
+          border-radius: 16px 10px 17px 11px;
+
+          background: rgba(255, 255, 255, 0.72);
+
+          box-shadow: 0 2px 10px rgba(45, 40, 32, 0.04);
+        }
+
+        .state-card {
+          min-height: 190px;
+        }
+
+        .state-flag {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          margin-top: 3px;
+
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: var(--ink-3);
+        }
+
+        .state-flag .dot {
+          width: 5px;
+          height: 5px;
+          border-radius: 50%;
+          background: currentColor;
+        }
+
+        .state-flag.working {
+          color: #a18b65;
+        }
+
+        .state-flag.working .dot {
+          animation: flag-pulse 1.4s ease-in-out infinite;
+        }
+
+        @keyframes flag-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.3; }
+        }
+
+        /* -----------------------------------------------
+           STATE 1 — working stage
+        ----------------------------------------------- */
+
+        .working-stage {
+          display: flex;
+          align-items: flex-start;
+          gap: 16px;
+
+          margin-top: 14px;
+          padding: 22px 20px;
+
+          border: 1.5px dashed var(--line-2);
+          border-radius: 13px 8px 14px 9px;
+
+          background: rgba(250, 248, 243, 0.75);
+        }
+
+        .working-mark {
+          display: flex;
+          width: 58px;
+          height: 58px;
+          align-items: center;
+          justify-content: center;
+
+          border: 1.5px dashed var(--clay-deep);
+          border-radius: 50%;
+
+          background: rgba(255, 255, 255, 0.7);
+          color: var(--clay-deep);
+
+          flex-shrink: 0;
+
+          animation: sketch-breathe 2.6s ease-in-out infinite;
+        }
+
+        @keyframes sketch-breathe {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.07); }
+        }
+
+        .working-copy {
+          min-width: 0;
+        }
+
+        .working-copy h3 {
+          margin: 0 0 8px;
+          font-size: 22px;
+          line-height: 1.08;
+          letter-spacing: -0.015em;
+          font-weight: 500;
+        }
+
+        .working-copy p {
+          margin: 0;
+          max-width: 560px;
+          color: var(--ink-2);
+          font-size: 10.5px;
+          line-height: 1.6;
+        }
+
+        .working-ticks {
+          display: flex;
+          gap: 5px;
+          margin-top: 14px;
+        }
+
+        .working-ticks i {
+          width: 24px;
+          height: 3px;
+          border-radius: 2px;
+          background: var(--line-2);
+
+          animation: tick-pulse 1.5s ease-in-out infinite;
+        }
+
+        .working-ticks i:nth-child(2) { animation-delay: 0.18s; }
+        .working-ticks i:nth-child(3) { animation-delay: 0.36s; }
+
+        @keyframes tick-pulse {
+          0%, 100% { background: var(--line-2); }
+          50% { background: var(--clay-deep); }
+        }
+
+        /* -----------------------------------------------
+           STATE 2 — tip boxes
+        ----------------------------------------------- */
+
+        .tip-grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 12px;
+          margin-top: 14px;
+        }
+
+        .tip-card {
+          position: relative;
+          min-height: 168px;
+
+          display: flex;
+          flex-direction: column;
+
+          padding: 14px 13px 12px;
+
+          border: 1.5px solid var(--line-2);
+          border-radius: 14px 9px 15px 10px;
+
+          background: rgba(255, 255, 255, 0.78);
+
+          box-shadow: 0 2px 10px rgba(45, 40, 32, 0.04);
+
+          transition:
+            border-color 160ms ease,
+            transform 160ms ease;
+        }
+
+        .tip-card:hover {
+          border-color: var(--clay-deep);
+        }
+
+        .tip-1 { transform: rotate(-0.4deg); }
+        .tip-2 { transform: translateY(4px); }
+        .tip-3 { transform: rotate(0.35deg); }
+
+        .tip-1:hover,
+        .tip-2:hover,
+        .tip-3:hover {
+          transform: rotate(0deg) translateY(0);
+        }
+
+        .tip-no {
+          display: inline-flex;
+          align-self: flex-start;
+
+          padding: 4px 9px;
+
+          border: 1px dashed var(--clay-deep);
+          border-radius: 7px 4px 8px 5px;
+
+          color: var(--clay-deep);
+
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          letter-spacing: 0.15em;
+
+          margin-bottom: 10px;
+        }
+
+        .tip-card h3 {
+          margin: 0 0 7px;
+          font-size: 16px;
+          line-height: 1.1;
+          font-weight: 500;
+        }
+
+        .tip-card p {
+          margin: 0;
+          flex: 1;
+          color: var(--ink-2);
+          font-size: 10px;
+          line-height: 1.6;
+          white-space: pre-line;
+        }
+
+        .view-details {
+          display: inline-block;
+          align-self: flex-start;
+
+          margin-top: 10px;
+          padding: 0;
+
+          border: 0;
+          background: transparent;
+
+          color: var(--clay-deep);
+          cursor: pointer;
+
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          letter-spacing: 0.04em;
+        }
+
+        .view-details:hover {
+          text-decoration: underline;
+        }
+
+        /* -----------------------------------------------
+           EMPTY SIGNAL
+        ----------------------------------------------- */
+
+        .empty-signal,
+        .logbook-empty {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+
+          margin-top: 12px;
+          padding: 16px;
+
+          border: 1.5px dashed var(--line-2);
+          border-radius: 11px 7px 12px 8px;
+
+          background: rgba(250, 248, 243, 0.72);
+        }
+
+        .empty-glyph {
+          font-size: 16px;
+          color: var(--ink-3);
+          line-height: 1;
+        }
+
+        .empty-signal strong,
+        .logbook-empty strong {
+          display: block;
+          font-size: 11px;
+          font-weight: 500;
+        }
+
+        .empty-signal p,
+        .logbook-empty p {
+          margin: 4px 0 0;
+          color: var(--ink-2);
+          font-size: 9.5px;
+          line-height: 1.55;
+        }
+
+        /* -----------------------------------------------
+           LOGBOOK
+        ----------------------------------------------- */
+
+        .logbook-list {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          margin-top: 12px;
+        }
+
+        .logbook-entry {
+          display: flex;
+          gap: 10px;
+          padding: 11px;
+
+          border: 1px solid var(--line-2);
+          border-radius: 10px 7px 11px 8px;
+
+          background: rgba(250, 248, 243, 0.65);
+        }
+
+        .logbook-entry p {
+          margin: 0;
+          color: var(--ink-2);
+          font-size: 9.5px;
+          line-height: 1.55;
+
+          display: -webkit-box;
+          -webkit-line-clamp: 3;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+
+        .logbook-index {
+          display: flex;
+          flex: 0 0 auto;
+          width: 22px;
+          height: 22px;
+          align-items: center;
+          justify-content: center;
+
+          border: 1px solid var(--line-2);
+          border-radius: 50%;
+
+          font-family: var(--mono, monospace);
+          font-size: 7.5px;
+          color: var(--ink-3);
+        }
+
+        /* -----------------------------------------------
+           STATE 3 — answer stack
+        ----------------------------------------------- */
+
+        .answer-stack {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 11px;
+          margin-top: 14px;
+        }
+
+        .answer-card {
+          min-width: 0;
+          min-height: 120px;
+
+          padding: 13px;
+
+          border: 1.5px solid var(--line-2);
+          border-radius: 13px 8px 14px 9px;
+
+          background: rgba(252, 250, 246, 0.82);
+        }
+
+        .answer-card.lead {
+          grid-column: 1 / -1;
+
+          border-color: var(--sage-deep);
+          border-radius: 15px 9px 16px 10px;
+
+          background: rgba(217, 226, 207, 0.3);
+        }
+
+        .answer-card.roadmap {
+          border-style: dashed;
+        }
+
+        .answer-card.roadmap .answer-kicker {
+          color: var(--sage-deep);
+        }
+
+        .answer-kicker {
+          display: inline-block;
+          margin-bottom: 9px;
+        }
+
+        .answer-card h3 {
+          margin: 0 0 7px;
+          font-size: 17px;
+          line-height: 1.1;
+          font-weight: 500;
+        }
+
+        .answer-card p {
+          margin: 0;
+          color: var(--ink-2);
+          font-size: 10px;
+          line-height: 1.6;
+          white-space: pre-line;
+        }
+
+        .chat-placeholder {
+          margin-top: 12px;
+          padding: 14px 15px;
+
+          border: 1.5px dashed var(--line-2);
+          border-radius: 10px 7px 11px 8px;
+
+          color: var(--ink-3);
+          font-size: 9.5px;
+          line-height: 1.55;
+        }
+
+        .chat-placeholder p {
+          margin: 0;
+        }
+
+        .logbook-question {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 6px;
+
+          margin-top: 10px;
+          padding: 9px 10px;
+
+          border: 1px solid var(--line-2);
+          border-radius: 9px 6px 10px 7px;
+
+          font-family: var(--mono, monospace);
+          font-size: 7.5px;
+          letter-spacing: 0.03em;
+          color: var(--ink-2);
+        }
+
+        .logbook-question span {
+          margin-right: auto;
+        }
+
+        .logbook-question button {
+          min-width: 38px;
+          padding: 5px 8px;
+
+          border: 1px solid var(--line-2);
+          border-radius: 999px;
+
+          background: transparent;
+          cursor: pointer;
+
+          font-family: var(--mono, monospace);
+          font-size: 7.5px;
+
+          transition:
+            border-color 150ms ease,
+            color 150ms ease;
+        }
+
+        .logbook-question button:first-of-type:hover {
+          border-color: var(--sage-deep);
+          color: var(--sage-deep);
+        }
+
+        .logbook-question button:last-of-type:hover {
+          border-color: var(--clay-deep);
+          color: var(--clay-deep);
+        }
+
+        /* -----------------------------------------------
+           AGENT SEARCH — input
+        ----------------------------------------------- */
+
+        .agent-input {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+
+          margin-top: 13px;
+          padding: 5px;
+
+          border: 1.5px solid var(--line-2);
+          border-radius: 13px 8px 14px 9px;
+
+          background: rgba(255, 255, 255, 0.85);
+        }
+
+        .agent-input:focus-within {
+          border-color: var(--clay-deep);
+        }
+
+        .agent-input-label {
+          flex-shrink: 0;
+
+          padding: 0 10px 0 8px;
+          border-right: 1px dashed var(--line-2);
+
+          font-family: var(--mono, monospace);
+          font-size: 7.5px;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+
+          color: var(--ink-3);
+          white-space: nowrap;
+        }
+
+        .agent-input input {
+          min-width: 0;
+          flex: 1;
+
+          border: 0;
+          outline: 0;
+          background: transparent;
+
+          padding: 8px 6px;
+
+          color: var(--ink);
+          font-size: 10.5px;
+        }
+
+        .agent-input input::placeholder {
+          color: var(--ink-3);
+        }
+
+        .agent-send {
+          display: flex;
+          flex: 0 0 auto;
+          width: 32px;
+          height: 32px;
+          align-items: center;
+          justify-content: center;
+
+          border: 0;
+          border-radius: 50%;
+
+          background: var(--clay-deep);
+          color: #fff;
+
+          cursor: pointer;
+          font-size: 14px;
+          line-height: 1;
+
+          box-shadow: 0 3px 12px rgba(168, 74, 43, 0.28);
+
+          transition:
+            background 150ms ease,
+            transform 150ms ease;
+        }
+
+        .agent-send:hover:not(:disabled) {
+          transform: translateY(-1px);
+        }
+
+        .agent-send:disabled {
+          cursor: not-allowed;
+          opacity: 0.4;
+          box-shadow: none;
+        }
+
+        .agent-footnote {
+          margin: 11px 0 0;
+          text-align: center;
+
+          font-family: var(--mono, monospace);
+          font-size: 7.5px;
+          letter-spacing: 0.11em;
+          color: var(--ink-3);
+        }
+
+        /* ===============================================
+           RIGHT — INSPECTOR
+        =============================================== */
+
+        .dataset-inspector {
+          min-height: 360px;
+          padding: 15px;
+
+          border: 1.5px dashed var(--line-2);
+          border-radius: 16px 10px 17px 11px;
+
+          background: rgba(255, 255, 255, 0.5);
+        }
+
+        .inspector-empty {
+          display: flex;
+          min-height: 330px;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+
+          padding: 20px;
+          text-align: center;
+        }
+
+        .inspector-icon {
+          display: flex;
+          width: 34px;
+          height: 34px;
+          align-items: center;
+          justify-content: center;
+
+          margin-bottom: 12px;
+
+          border: 1px dashed var(--line-2);
+          border-radius: 50%;
+
+          background: rgba(250, 248, 243, 0.9);
+          color: var(--ink-3);
+          font-size: 13px;
+        }
+
+        .inspector-kicker {
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.14em;
+          color: var(--ink-3);
+        }
+
+        .inspector-empty h2,
+        .inspector-content h2 {
+          margin: 7px 0 8px;
+          font-family: var(--serif, Georgia, serif);
+          font-size: 20px;
+          font-weight: 500;
+          line-height: 1.05;
+        }
+
+        .inspector-empty p {
+          max-width: 210px;
+          margin: 0;
+          color: var(--ink-2);
+          font-size: 9.5px;
+          line-height: 1.55;
+        }
+
+        .inspector-empty p strong {
+          color: var(--clay-deep);
+        }
+
+        .inspector-footnote {
+          margin-top: 18px;
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.11em;
+          color: var(--ink-3);
+        }
+
+        .inspector-content > .inspector-icon {
+          margin-top: 14px;
+        }
+
+        .inspector-status {
+          margin: 10px 0 0;
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.13em;
+          color: var(--clay-deep);
+        }
+
+        .inspector-lede {
+          margin: 0;
+          color: var(--ink-2);
+          font-size: 9.5px;
+          line-height: 1.55;
+        }
+
+        .inspector-metrics {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 7px;
+          margin-top: 14px;
+        }
+
+        .inspector-metrics > div {
+          padding: 9px 10px;
+          border: 1px solid var(--line-2);
+          border-radius: 10px 6px 11px 7px;
+          background: rgba(250, 248, 243, 0.78);
+        }
+
+        .inspector-metrics span,
+        .modal-stats span {
+          display: block;
+          font-family: var(--mono, monospace);
+          font-size: 7px;
+          text-transform: uppercase;
+          letter-spacing: 0.09em;
+          color: var(--ink-3);
+        }
+
+        .inspector-metrics strong,
+        .modal-stats strong {
+          display: block;
+          margin-top: 4px;
+          font-size: 12px;
+          font-weight: 500;
+        }
+
+        .inspector-columns {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          margin-top: 16px;
+        }
+
+        .inspector-columns-label {
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.13em;
+          color: var(--ink-3);
+        }
+
+        .inspector-column {
+          padding: 9px;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .inspector-column > div {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 5px;
+        }
+
+        .inspector-column strong {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          font-size: 9.5px;
+          font-weight: 500;
+        }
+
+        .inspector-column span {
+          flex: 0 0 auto;
+          font-family: var(--mono, monospace);
+          font-size: 7px;
+          color: var(--ink-3);
+        }
+
+        .inspector-column p {
+          margin: 4px 0 0;
+          color: var(--ink-3);
+          font-size: 8px;
+          line-height: 1.45;
+        }
+
+        /* ===============================================
+           MODALS
+        =============================================== */
+
+        .modal-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 100;
+
+          display: flex;
+          align-items: center;
+          justify-content: center;
+
+          padding: 20px;
+
+          background: rgba(37, 33, 27, 0.3);
+          backdrop-filter: blur(4px);
+        }
+
+        .details-modal {
+          width: min(760px, 100%);
+          max-height: min(82vh, 760px);
+          overflow: hidden;
+
+          border: 1.5px solid var(--line-2);
+          border-radius: 18px 11px 19px 12px;
+
+          background: var(--paper);
+
+          box-shadow: 0 20px 70px rgba(35, 30, 24, 0.22);
+        }
+
+        .modal-head {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 15px;
+
+          padding: 19px 20px 14px;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .modal-head-kicker {
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.14em;
+          color: var(--clay-deep);
+        }
+
+        .modal-head h2 {
+          margin: 5px 0 0;
+          font-family: var(--serif, Georgia, serif);
+          font-size: 25px;
+          font-weight: 500;
+          line-height: 1.05;
+        }
+
+        .modal-close {
+          display: flex;
+          width: 30px;
+          height: 30px;
+          align-items: center;
+          justify-content: center;
+
+          border: 1px solid var(--line-2);
+          border-radius: 50%;
+
+          background: transparent;
+          color: var(--ink-2);
+
+          cursor: pointer;
+          font-size: 18px;
+          line-height: 1;
+
+          transition: border-color 150ms ease, color 150ms ease;
+        }
+
+        .modal-close:hover {
+          border-color: var(--clay-deep);
+          color: var(--clay-deep);
+        }
+
+        .details-modal > .lede {
+          margin: 0;
+          padding: 14px 20px;
+          color: var(--ink-2);
+          font-size: 10.5px;
+          line-height: 1.6;
+        }
+
+        .modal-stats {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 8px;
+          padding: 0 20px 14px;
+        }
+
+        .modal-stats > div {
+          padding: 10px;
+          border: 1px solid var(--line-2);
+          border-radius: 10px 6px 11px 7px;
+        }
+
+        .modal-schema {
+          max-height: 47vh;
+          overflow: auto;
+          border-top: 1px solid var(--line);
+          padding: 11px 20px 20px;
+        }
+
+        .modal-schema-row {
+          display: grid;
+          grid-template-columns: minmax(130px, 1fr) 2fr;
+          gap: 15px;
+          padding: 10px 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .modal-schema-row > div {
+          display: flex;
+          flex-direction: column;
+          gap: 3px;
+        }
+
+        .modal-schema-row strong {
+          font-size: 9.5px;
+          font-weight: 500;
+        }
+
+        .modal-schema-row span {
+          font-family: var(--mono, monospace);
+          font-size: 7px;
+          color: var(--ink-3);
+        }
+
+        .modal-schema-row p {
+          margin: 0;
+          color: var(--ink-2);
+          font-size: 9px;
+          line-height: 1.5;
+        }
+
+        .agent-details-modal {
+          max-width: 820px;
+        }
+
+        .full-agent-section {
+          max-height: 66vh;
+          overflow: auto;
+          padding: 18px 20px 22px;
+          color: var(--ink-2);
+          font-size: 10.5px;
+          line-height: 1.7;
+        }
+
+        .full-agent-kicker {
+          font-family: var(--mono, monospace);
+          font-size: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.13em;
+          color: var(--sage-deep);
+        }
+
+        .full-agent-section > div {
+          margin-top: 11px;
+        }
+
+        /* ===============================================
+           RESPONSIVE
+        =============================================== */
+
+        @media (max-width: 1000px) {
+          .dash-shell {
+            grid-template-columns: 190px minmax(0, 1fr);
+          }
+
+          .dash-rail-right {
+            display: none;
+          }
+        }
+
+        @media (max-width: 700px) {
+          .dash-shell {
+            grid-template-columns: 1fr;
+            width: min(100% - 24px, 620px);
+          }
+
+          .dash-rail-left {
+            position: static;
+          }
+
+          .dataset-list {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .tip-grid,
+          .answer-stack {
+            grid-template-columns: 1fr;
+          }
+
+          .tip-1,
+          .tip-2,
+          .tip-3 {
+            transform: none;
+          }
+
+          .working-stage {
+            flex-direction: column;
+          }
+
+          .agent-input-label {
+            display: none;
+          }
+
+          .modal-stats {
+            grid-template-columns: repeat(2, 1fr);
+          }
+
+          .modal-schema-row {
+            grid-template-columns: 1fr;
+            gap: 5px;
+          }
+        }
+      `}</style>
     </main>
   );
 }
 
-function DatasetWorkspace({ dataset }: { dataset: Dataset }) {
+/* =========================================================
+   DATASET INSPECTOR — logic identical
+========================================================= */
+
+function DatasetInspector({ dataset }: { dataset: Dataset }) {
   const context = dataset.context?.context;
-  if (dataset.status === "ANALYZING" || dataset.status === "UPLOADING")
-    return (
-      <div className="workspace-card">
-        <span className="dataset-status working">
-          <span className="dot" aria-hidden="true" />
-          {statusLabel[dataset.status]}
-        </span>
-        <h2>We&apos;re learning {dataset.fileName}.</h2>
-        <p className="lede">
-          Your {dataset.rowCount.toLocaleString()} uploaded rows are safe in the
-          workspace. Semantic understanding will appear here automatically.
-        </p>
-      </div>
-    );
-  if (dataset.status === "FAILED")
-    return (
-      <div className="banner error">
-        <span className="rail-title" style={{ color: "var(--clay-deep)" }}>
-          Needs attention
-        </span>
-        <h2>This dataset needs attention.</h2>
-        <p className="error-text">{dataset.error ?? "Analysis could not complete."}</p>
-      </div>
-    );
+
   return (
-    <div className="workspace-card">
-      <span className="rail-title">Dataset understanding</span>
+    <div className="inspector-content">
+      <div className="rail-head">
+        <span className="rail-title">Dataset inspector</span>
+        <span className="mono text-[8px] tracking-[.1em] text-[var(--sage-deep)]">
+          DETAILS
+        </span>
+      </div>
+
+      <div className="inspector-icon">▤</div>
+
+      <p className="inspector-status">{dataset.status}</p>
+
       <h2>{context?.entity ?? dataset.fileName}</h2>
-      {context?.description && <p className="lede">{context.description}</p>}
-      <div className="col-grid">
-        {dataset.columns.map((column) => (
-          <div key={column.name} className="col-cell">
-            <span className="name">{column.name}</span>
-            <span className="desc">
+
+      <p className="inspector-lede">
+        {context?.description ??
+          "Semantic understanding for this dataset will appear here after analysis."}
+      </p>
+
+      <div className="inspector-metrics">
+        <div>
+          <span>Rows</span>
+          <strong>{dataset.rowCount.toLocaleString()}</strong>
+        </div>
+        <div>
+          <span>Columns</span>
+          <strong>{dataset.columns.length}</strong>
+        </div>
+      </div>
+
+      <div className="inspector-columns">
+        <span className="inspector-columns-label">Schema</span>
+
+        {dataset.columns.slice(0, 12).map((column) => (
+          <div key={column.name} className="inspector-column">
+            <div>
+              <strong>{column.name}</strong>
+              <span>{column.type}</span>
+            </div>
+            <p>
               {context?.columns?.[column.name] ??
-                "Meaning will be available after analysis."}
-            </span>
-            <span className="type">{column.type}</span>
+                "No semantic description available yet."}
+            </p>
           </div>
         ))}
       </div>
@@ -396,25 +2287,121 @@ function DatasetWorkspace({ dataset }: { dataset: Dataset }) {
   );
 }
 
-function EmptyState({ onUpload }: { onUpload: () => void }) {
+/* =========================================================
+   DATASET DETAILS MODAL — logic identical
+========================================================= */
+
+function DatasetDetailsModal({
+  dataset,
+  onClose,
+}: {
+  dataset: Dataset;
+  onClose: () => void;
+}) {
+  const context = dataset.context?.context;
+
   return (
-    <div className="empty-dash">
-      <p className="kicker">Workspace · Step 02</p>
-      <h1 className="serif">
-        Let&apos;s understand your <em>business</em>.
-      </h1>
-      <p>
-        Upload your first CSV to create a shared data workspace for the
-        dashboard and your future AI growth agent.
-      </p>
-      <button
-        type="button"
-        onClick={onUpload}
-        className="btn btn-primary cursor-pointer"
-        style={{ marginTop: 8 }}
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <div
+        className="details-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${dataset.fileName} details`}
+        onMouseDown={(event) => event.stopPropagation()}
       >
-        Upload data
-      </button>
+        <div className="modal-head">
+          <div>
+            <span className="modal-head-kicker">Dataset details</span>
+            <h2>{context?.entity ?? dataset.fileName}</h2>
+          </div>
+          <button type="button" className="modal-close" onClick={onClose}>
+            ×
+          </button>
+        </div>
+
+        <p className="lede">
+          {context?.description ?? "No semantic description available yet."}
+        </p>
+
+        <div className="modal-stats">
+          <div>
+            <span>File</span>
+            <strong>{dataset.fileName}</strong>
+          </div>
+          <div>
+            <span>Rows</span>
+            <strong>{dataset.rowCount.toLocaleString()}</strong>
+          </div>
+          <div>
+            <span>Columns</span>
+            <strong>{dataset.columns.length}</strong>
+          </div>
+          <div>
+            <span>Status</span>
+            <strong>{statusLabel[dataset.status]}</strong>
+          </div>
+        </div>
+
+        <div className="modal-schema">
+          {dataset.columns.map((column) => (
+            <div key={column.name} className="modal-schema-row">
+              <div>
+                <strong>{column.name}</strong>
+                <span>{column.type}</span>
+              </div>
+              <p>
+                {context?.columns?.[column.name] ??
+                  "No semantic description available."}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   AGENT DETAILS MODAL — logic identical
+========================================================= */
+
+function AgentDetailsModal({
+  sections,
+  id,
+  onClose,
+}: {
+  sections: AgentSection[];
+  id: string;
+  onClose: () => void;
+}) {
+  const section = sections.find((item) => item.id === id);
+
+  if (!section) return null;
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <div
+        className="details-modal agent-details-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${section.title} details`}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="modal-head">
+          <div>
+            <span className="modal-head-kicker">Full analysis</span>
+            <h2>{section.title}</h2>
+          </div>
+          <button type="button" className="modal-close" onClick={onClose}>
+            ×
+          </button>
+        </div>
+
+        <div className="full-agent-section">
+          <span className="full-agent-kicker">{section.kind}</span>
+          <div className="whitespace-pre-wrap">{section.body}</div>
+        </div>
+      </div>
     </div>
   );
 }

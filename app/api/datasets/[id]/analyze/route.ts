@@ -23,7 +23,9 @@ export async function POST(
     return NextResponse.json({ error: "Dataset not found" }, { status: 404 });
   }
 
-  if (dataset.status === DatasetStatus.READY) {
+  const force = new URL(request.url).searchParams.get("force") === "true";
+
+  if (dataset.status === DatasetStatus.READY && !force) {
     return NextResponse.json({ success: true, status: dataset.status });
   }
 
@@ -54,10 +56,7 @@ export async function POST(
 
     const INNER_TIMEOUT_MS = 90_000;
     const innerAbort = new AbortController();
-    const innerTimer = setTimeout(
-      () => innerAbort.abort(),
-      INNER_TIMEOUT_MS,
-    );
+    const innerTimer = setTimeout(() => innerAbort.abort(), INNER_TIMEOUT_MS);
 
     let response: Response;
     try {
@@ -91,21 +90,21 @@ export async function POST(
     const context = (await response.json()) as Record<string, unknown>;
     const contextJson = toJsonValue(context);
 
-    await prisma.$transaction([
-      prisma.datasetContext.upsert({
-        where: { datasetId: id },
-        create: { datasetId: id, context: contextJson },
-        update: { context: contextJson },
-      }),
-      prisma.dataset.update({
-        where: { id },
-        data: { status: DatasetStatus.READY, error: null },
-      }),
-    ]);
+    await prisma.datasetContext.upsert({
+      where: { datasetId: id },
+      create: { datasetId: id, context: contextJson },
+      update: { context: contextJson },
+    });
+
+    await prisma.dataset.update({
+      where: { id },
+      data: { status: DatasetStatus.READY, error: null },
+    });
 
     return NextResponse.json({ success: true, status: DatasetStatus.READY });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "AI analysis failed";
+    const message =
+      error instanceof Error ? error.message : "AI analysis failed";
     await prisma.dataset.update({
       where: { id },
       data: { status: DatasetStatus.FAILED, error: message },
