@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 
 import { DatasetStatus } from "@/app/generated/prisma/client";
 import { prisma } from "@/lib/db";
 
 type Column = { original: string; name: string; type: string };
+
+const TABLE_NAME_RE = /^[a-z0-9_]{1,64}$/;
+
+function toJsonValue(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
 
 export async function POST(
   request: NextRequest,
@@ -20,6 +27,20 @@ export async function POST(
     return NextResponse.json({ success: true, status: dataset.status });
   }
 
+  if (dataset.status === DatasetStatus.ANALYZING) {
+    return NextResponse.json(
+      { error: "Analysis already in progress", status: dataset.status },
+      { status: 409 },
+    );
+  }
+
+  if (!TABLE_NAME_RE.test(dataset.tableName)) {
+    return NextResponse.json(
+      { error: "Invalid dataset table name" },
+      { status: 500 },
+    );
+  }
+
   await prisma.dataset.update({
     where: { id },
     data: { status: DatasetStatus.ANALYZING, error: null },
@@ -31,29 +52,50 @@ export async function POST(
       `SELECT * FROM "${dataset.tableName}" LIMIT 5`,
     );
 
-    const response = await fetch(new URL("/api/analyze", request.url), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        table_name: dataset.tableName,
-        file_name: dataset.fileName,
-        columns: columns.map((column) => ({
-          name: column.name,
-          original_name: column.original,
-          type: column.type,
-        })),
-        sample_rows: sampleRows,
-      }),
-    });
+    const INNER_TIMEOUT_MS = 90_000;
+    const innerAbort = new AbortController();
+    const innerTimer = setTimeout(
+      () => innerAbort.abort(),
+      INNER_TIMEOUT_MS,
+    );
 
-    const context = await response.json();
-    if (!response.ok) throw new Error(context.error ?? "AI analysis failed");
+    let response: Response;
+    try {
+      response = await fetch(new URL("/api/analyze", request.url), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          table_name: dataset.tableName,
+          file_name: dataset.fileName,
+          columns: columns.map((column) => ({
+            name: column.name,
+            original_name: column.original,
+            type: column.type,
+          })),
+          sample_rows: sampleRows,
+        }),
+        signal: innerAbort.signal,
+      });
+    } finally {
+      clearTimeout(innerTimer);
+    }
+
+    if (!response.ok) {
+      const errBody = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        details?: string;
+      };
+      throw new Error(errBody.error ?? "AI analysis failed");
+    }
+
+    const context = (await response.json()) as Record<string, unknown>;
+    const contextJson = toJsonValue(context);
 
     await prisma.$transaction([
       prisma.datasetContext.upsert({
         where: { datasetId: id },
-        create: { datasetId: id, context },
-        update: { context },
+        create: { datasetId: id, context: contextJson },
+        update: { context: contextJson },
       }),
       prisma.dataset.update({
         where: { id },

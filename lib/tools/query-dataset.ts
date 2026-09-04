@@ -3,48 +3,62 @@ import { z } from "zod";
 
 import { prisma } from "@/lib/db";
 
+const OPS = [
+  "=",
+  "!=",
+  ">",
+  "<",
+  ">=",
+  "<=",
+  "LIKE",
+  "ILIKE",
+] as const;
+
+const filterSchema = z.object({
+  column: z
+    .string()
+    .regex(/^[a-z0-9_]{1,64}$/, "column must be a sanitized identifier"),
+  op: z.enum(OPS),
+  value: z.union([z.string(), z.number(), z.boolean()]),
+});
+
 const schema = z.object({
-  tableName: z.string().min(1),
-  condition: z.string().optional(),
+  tableName: z
+    .string()
+    .regex(/^[a-z0-9_]{1,64}$/, "tableName must be a sanitized identifier"),
+  filters: z.array(filterSchema).max(20).optional(),
+  orderBy: z
+    .object({
+      column: z
+        .string()
+        .regex(/^[a-z0-9_]{1,64}$/, "column must be a sanitized identifier"),
+      direction: z.enum(["asc", "desc"]),
+    })
+    .optional(),
   limit: z.number().int().min(1).max(100).default(50),
 });
 
-function validateCondition(condition: string) {
-  const blocked = [
-    ";",
-    "--",
-    "/*",
-    "*/",
-    "INSERT",
-    "UPDATE",
-    "DELETE",
-    "DROP",
-    "ALTER",
-    "TRUNCATE",
-    "CREATE",
-    "GRANT",
-    "REVOKE",
-  ];
+const TABLE_NAME_RE = /^[a-z0-9_]{1,64}$/;
 
-  const upper = condition.toUpperCase();
-
-  for (const token of blocked) {
-    if (upper.includes(token)) {
-      throw new Error("Unsafe condition detected.");
-    }
+function quoteIdent(name: string): string {
+  if (!TABLE_NAME_RE.test(name)) {
+    throw new Error(`Invalid identifier: ${name}`);
   }
+  return `"${name}"`;
 }
 
 export const queryDataset = tool(
-  async ({ tableName, condition, limit }) => {
+  async ({ tableName, filters, orderBy, limit }) => {
+    if (!TABLE_NAME_RE.test(tableName)) {
+      throw new Error("Invalid tableName");
+    }
     const dataset = await prisma.dataset.findUnique({
-      where: {
-        tableName,
-      },
+      where: { tableName },
       select: {
         id: true,
         tableName: true,
         status: true,
+        columns: true,
       },
     });
 
@@ -56,19 +70,47 @@ export const queryDataset = tool(
       throw new Error("Dataset is not ready.");
     }
 
-    if (condition) {
-      validateCondition(condition);
+    const knownColumns = new Set(
+      (dataset.columns as Array<{ name: string }>).map((c) => c.name),
+    );
+
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (filters?.length) {
+      for (const f of filters) {
+        if (!knownColumns.has(f.column)) {
+          throw new Error(
+            `Unknown column "${f.column}". Available: ${Array.from(
+              knownColumns,
+            )
+              .slice(0, 10)
+              .join(", ")}`,
+          );
+        }
+        params.push(f.value);
+        where.push(`${quoteIdent(f.column)} ${f.op} $${params.length}`);
+      }
     }
 
-    const safeLimit = Math.min(Math.max(limit ?? 50, 1), 100);
+    const safeLimit = Math.min(Math.max(limit, 1), 100);
+    const orderClause = (() => {
+      if (!orderBy) return "";
+      if (!knownColumns.has(orderBy.column)) {
+        throw new Error(`Unknown orderBy column "${orderBy.column}"`);
+      }
+      const dir = orderBy.direction === "desc" ? "DESC" : "ASC";
+      return ` ORDER BY ${quoteIdent(orderBy.column)} ${dir}`;
+    })();
 
-    const query = condition?.trim()
-      ? `SELECT * FROM "${tableName}" WHERE ${condition} LIMIT ${safeLimit}`
-      : `SELECT * FROM "${tableName}" LIMIT ${safeLimit}`;
+    const whereClause = where.length ? ` WHERE ${where.join(" AND ")}` : "";
+    const query = `SELECT * FROM ${quoteIdent(
+      tableName,
+    )}${whereClause}${orderClause} LIMIT ${safeLimit}`;
 
-    const rows = await prisma.$queryRawUnsafe<
-      Record<string, unknown>[]
-    >(query);
+    const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+      query,
+      ...params,
+    );
 
     return JSON.stringify({
       tableName,
@@ -79,7 +121,7 @@ export const queryDataset = tool(
   {
     name: "query_dataset",
     description:
-      "Query actual records from a merchant dataset. Use a valid table name from get_dataset_context and provide an optional SQL WHERE condition. This tool is read-only and returns a limited number of rows.",
+      "Query actual records from a merchant dataset. Inputs: tableName (sanitized id from get_dataset_context), optional filters (array of {column, op, value} where op is one of =, !=, >, <, >=, <=, LIKE, ILIKE), optional orderBy ({column, direction: 'asc'|'desc'}), and limit (1-100, default 50). Returns rows from that table. Read-only.",
     schema,
   },
 );

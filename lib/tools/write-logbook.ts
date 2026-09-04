@@ -12,6 +12,10 @@ const schema = z.object({
   datasetIds: z.array(z.string()).optional(),
 });
 
+function toJsonValue(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
 export const writeLogbook = tool(
   async ({ type, title, summary, evidence, datasetIds }) => {
     const entry = await prisma.logbookEntry.create({
@@ -19,8 +23,9 @@ export const writeLogbook = tool(
         type,
         title,
         summary,
-        evidence: evidence ?? undefined,
-        datasetIds: datasetIds ?? undefined,
+        evidence: evidence !== undefined ? toJsonValue(evidence) : undefined,
+        datasetIds:
+          datasetIds !== undefined ? toJsonValue(datasetIds) : undefined,
       },
     });
 

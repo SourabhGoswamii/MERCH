@@ -137,6 +137,13 @@ ${sampleData}
       `Analyzing dataset: ${body.table_name}`,
     );
 
+    const ANALYSIS_TIMEOUT_MS = 60_000;
+    const abort = new AbortController();
+    const timer = setTimeout(
+      () => abort.abort(),
+      ANALYSIS_TIMEOUT_MS,
+    );
+
     const response = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",
       {
@@ -171,8 +178,10 @@ ${sampleData}
             type: "json_object",
           },
         }),
+        signal: abort.signal,
       },
     );
+    clearTimeout(timer);
 
     if (!response.ok) {
       const errorText =
