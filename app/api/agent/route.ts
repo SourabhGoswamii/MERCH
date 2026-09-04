@@ -98,12 +98,19 @@ export async function POST(request: NextRequest) {
         const lastAi = [...(finalState.messages ?? [])]
           .reverse()
           .find((m) => m.getType() === "ai");
-        const responseText =
-          lastAi && typeof lastAi.content === "string"
+        const responseText = lastAi
+          ? typeof lastAi.content === "string"
             ? lastAi.content
-            : lastAi
-              ? JSON.stringify(lastAi.content)
-              : "";
+            : Array.isArray(lastAi.content)
+              ? (() => {
+                  try {
+                    return JSON.stringify(lastAi.content);
+                  } catch {
+                    return "";
+                  }
+                })()
+              : ""
+          : "";
 
         const result = {
           success: true,

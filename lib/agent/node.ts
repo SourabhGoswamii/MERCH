@@ -147,10 +147,10 @@ export async function formatInsightsNode(
       ? last.content.trim().length > 0
       : Array.isArray(last.content)
         ? last.content.length > 0
-        : true;
+        : false;
 
   let newMessages: BaseMessage[] = [];
-  if (!lastHasText || (last.tool_calls?.length ?? 0) > 0) {
+  if (!lastHasText || (Array.isArray(last.tool_calls) && last.tool_calls.length > 0)) {
     const synth = new SystemMessage(
       `You have reached the maximum number of tool calls. Based on the
 conversation and tool results so far, write the final business answer the
@@ -172,19 +172,37 @@ any more tools. Do not include JSON, markdown, or code fences.`,
     }
   }
 
+  const lastContent = (() => {
+    if (typeof last.content === "string") return last.content;
+    if (Array.isArray(last.content)) {
+      try {
+        return JSON.stringify(last.content);
+      } catch {
+        return "";
+      }
+    }
+    return "";
+  })();
+
   const transcript = state.messages
     .map((m) => {
-      const role =
-        m.getType() === "system"
-          ? "system"
-          : m.getType() === "human"
-            ? "user"
-            : m.getType() === "ai"
-              ? "assistant"
-              : "tool";
-      const content =
-        typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-      return `${role}: ${content}`;
+      try {
+        const role =
+          m.getType() === "system"
+            ? "system"
+            : m.getType() === "human"
+              ? "user"
+              : m.getType() === "ai"
+                ? "assistant"
+                : m.getType() === "tool"
+                  ? "tool"
+                  : "other";
+        const content =
+          typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "");
+        return `${role}: ${content}`;
+      } catch {
+        return "other: <unserializable>";
+      }
     })
     .join("\n");
 
@@ -197,16 +215,17 @@ Return valid JSON matching the provided schema. If the final message is a
 clarifying question or contains no insight, return an empty insights array.`,
     ),
     new SystemMessage(`Conversation:\n${transcript}`),
-    new SystemMessage(
-      `Final assistant message:\n${typeof last.content === "string" ? last.content : JSON.stringify(last.content)}`,
-    ),
+    new SystemMessage(`Final assistant message:\n${lastContent}`),
   ];
 
   const structured = getLlm().withStructuredOutput(InsightsSchema);
   try {
     const parsed = await structured.invoke(extractionPrompt);
+    const insights = Array.isArray(parsed?.insights)
+      ? (parsed.insights as Insight[])
+      : [];
     return {
-      insights: (parsed.insights ?? []) as Insight[],
+      insights,
       messages: newMessages.length > 0 ? newMessages : [],
     };
   } catch {
