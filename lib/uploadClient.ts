@@ -38,6 +38,18 @@ export async function uploadCsvInChunks(
   const maxConcurrentChunks =
     options.maxConcurrentChunks ?? DEFAULT_CONCURRENCY;
 
+  /*
+   * On serverless platforms (Vercel, AWS Lambda) each request may run in a
+   * different instance with an isolated /tmp filesystem. The chunked upload
+   * protocol requires every chunk to land on the same instance as the
+   * session creator, which is not guaranteed. Fall back to a single-shot
+   * upload so the file stays inside one request.
+   */
+  const canChunk = await supportsChunkedUpload();
+  if (!canChunk) {
+    return uploadSingleShot(file, options);
+  }
+
   const fileName = file.name;
   const totalBytes = file.size;
   const totalChunks = Math.max(1, Math.ceil(totalBytes / chunkSize));
@@ -325,4 +337,86 @@ function mapServerType(type: string): AuditEvent["type"] {
     return type as AuditEvent["type"];
   }
   return "info";
+}
+
+async function supportsChunkedUpload(): Promise<boolean> {
+  try {
+    const res = await fetch("/api/upload-file", {
+      method: "GET",
+      cache: "no-store",
+    });
+    if (!res.ok) return true;
+    const data = (await res.json()) as { chunked?: boolean };
+    return data.chunked !== false;
+  } catch {
+    return true;
+  }
+}
+
+async function uploadSingleShot(
+  file: File,
+  options: UploadOptions,
+): Promise<UploadProgress> {
+  const fileName = file.name;
+  const totalBytes = file.size;
+
+  const progress: UploadProgress = {
+    fileName,
+    totalBytes,
+    totalChunks: 1,
+    chunksSent: 0,
+    bytesSent: 0,
+    state: "creating",
+  };
+  const update = (patch: Partial<UploadProgress>) => {
+    Object.assign(progress, patch);
+    options.onProgress?.(progress);
+  };
+
+  audit.record({
+    level: "info",
+    type: "upload.session.create",
+    message: `Single-shot upload of ${fileName} (${totalBytes} bytes)`,
+    meta: { fileName, totalBytes, mode: "single-shot" },
+  });
+
+  update({ state: "uploading" });
+
+  try {
+    const res = await fetch("/api/upload-file", {
+      method: "POST",
+      headers: { "x-file-name": fileName },
+      body: file,
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      success?: boolean;
+      error?: string;
+      datasetId?: string;
+      tableName?: string;
+      rowCount?: number;
+    };
+    if (!res.ok || !data.success) {
+      throw new Error(data.error ?? `Upload failed (${res.status})`);
+    }
+    progress.chunksSent = 1;
+    progress.bytesSent = totalBytes;
+    update({
+      state: "completed",
+      datasetId: data.datasetId,
+      tableName: data.tableName,
+      rowCount: data.rowCount,
+    });
+    return progress;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Upload failed";
+    update({ state: "failed", error: message });
+    audit.record({
+      level: "error",
+      type: "upload.error",
+      message: `Single-shot upload failed for ${fileName}: ${message}`,
+      meta: { fileName, error: message },
+    });
+    throw error;
+  }
 }

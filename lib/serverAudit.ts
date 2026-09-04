@@ -52,10 +52,32 @@ export function emit(
   }
 }
 
-export const UPLOAD_TMP_ROOT =
-  process.env.UPLOAD_TMP_DIR && process.env.UPLOAD_TMP_DIR.trim().length > 0
-    ? process.env.UPLOAD_TMP_DIR
-    : path.join(process.cwd(), ".uploads");
+export function defaultUploadTmpRoot(): string {
+  if (
+    process.env.UPLOAD_TMP_DIR &&
+    process.env.UPLOAD_TMP_DIR.trim().length > 0
+  ) {
+    return process.env.UPLOAD_TMP_DIR;
+  }
+
+  /*
+   * On serverless platforms (Vercel, AWS Lambda) the only writable
+   * directory is the OS temp directory. process.cwd() resolves to a
+   * read-only bundle path like /var/task, where mkdir fails with ENOENT.
+   */
+  const isServerless =
+    !!process.env.VERCEL ||
+    !!process.env.AWS_LAMBDA_FUNCTION_NAME ||
+    !!process.env.LAMBDA_TASK_ROOT;
+
+  if (isServerless) {
+    return path.join("/tmp", "uploads");
+  }
+
+  return path.join(process.cwd(), ".uploads");
+}
+
+export const UPLOAD_TMP_ROOT = defaultUploadTmpRoot();
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

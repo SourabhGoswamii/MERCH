@@ -168,6 +168,23 @@ export async function assembleAndIngest(sessionId: string): Promise<{
   }
   const csv = Buffer.concat(buffers).toString("utf-8");
 
+  return ingestCsvString({
+    fileName: meta.fileName,
+    csv,
+  });
+}
+
+export async function ingestCsvString(args: {
+  fileName: string;
+  csv: string;
+}): Promise<{
+  datasetId: string;
+  fileName: string;
+  tableName: string;
+  rowCount: number;
+}> {
+  const { fileName, csv } = args;
+
   const parsed = Papa.parse<Record<string, string>>(csv, {
     header: true,
     skipEmptyLines: true,
@@ -176,29 +193,16 @@ export async function assembleAndIngest(sessionId: string): Promise<{
     (e) => e.type === "Quotes",
   );
   if (fatalErrors.length) {
-    emit(sessionId, {
-      level: "error",
-      type: "upload.error",
-      message: `Failed to parse ${meta.fileName}`,
-      meta: { errors: fatalErrors.slice(0, 5) },
-    });
     throw new Error(
-      `Failed to parse ${meta.fileName}: ${fatalErrors[0]?.message ?? "unknown"}`,
+      `Failed to parse ${fileName}: ${fatalErrors[0]?.message ?? "unknown"}`,
     );
   }
 
   const originalColumns = parsed.meta.fields ?? [];
   if (!originalColumns.length) {
-    throw new Error(`${meta.fileName} has no columns`);
+    throw new Error(`${fileName} has no columns`);
   }
   const rows = parsed.data;
-
-  emit(sessionId, {
-    level: "info",
-    type: "upload.parsed",
-    message: `Parsed ${rows.length} rows × ${originalColumns.length} columns`,
-    meta: { rows: rows.length, columns: originalColumns.length },
-  });
 
   const columns: Column[] = makeUniqueColumnNames(originalColumns).map(
     (c) => ({
@@ -207,31 +211,20 @@ export async function assembleAndIngest(sessionId: string): Promise<{
     }),
   );
 
-  const tableName = createTableName(meta.fileName);
+  const tableName = createTableName(fileName);
   let dataset;
   try {
     dataset = await prisma.dataset.create({
       data: {
-        fileName: meta.fileName,
+        fileName,
         tableName,
         columns,
         status: DatasetStatus.UPLOADING,
       },
     });
-    emit(sessionId, {
-      level: "ok",
-      type: "dataset.create",
-      message: `Dataset row created (id=${dataset.id})`,
-      meta: { datasetId: dataset.id, tableName },
-    });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to create dataset row";
-    emit(sessionId, {
-      level: "error",
-      type: "upload.error",
-      message,
-    });
     throw error;
   }
 
@@ -242,24 +235,12 @@ export async function assembleAndIngest(sessionId: string): Promise<{
     await prisma.$executeRawUnsafe(
       `CREATE TABLE "${tableName}" (${definitions})`,
     );
-    emit(sessionId, {
-      level: "ok",
-      type: "upload.table.created",
-      message: `Created table ${tableName}`,
-      meta: { tableName, columns: columns.length },
-    });
 
     let inserted = 0;
     for (let start = 0; start < rows.length; start += BATCH_SIZE) {
       const batch = rows.slice(start, start + BATCH_SIZE);
       await insertBatch(tableName, columns, batch);
       inserted += batch.length;
-      emit(sessionId, {
-        level: "info",
-        type: "upload.rows.inserted",
-        message: `Inserted ${inserted}/${rows.length} rows`,
-        meta: { inserted, total: rows.length },
-      });
     }
 
     const ready = await prisma.dataset.update({
@@ -269,15 +250,9 @@ export async function assembleAndIngest(sessionId: string): Promise<{
         status: DatasetStatus.UPLOADING,
       },
     });
-    emit(sessionId, {
-      level: "ok",
-      type: "upload.complete",
-      message: `Upload complete — ${rows.length} rows ready for analysis`,
-      meta: { datasetId: dataset.id, rowCount: rows.length },
-    });
     return {
       datasetId: ready.id,
-      fileName: meta.fileName,
+      fileName,
       tableName,
       rowCount: rows.length,
     };
@@ -288,14 +263,6 @@ export async function assembleAndIngest(sessionId: string): Promise<{
       where: { id: dataset.id },
       data: { status: DatasetStatus.FAILED, error: message },
     });
-    emit(sessionId, {
-      level: "error",
-      type: "upload.error",
-      message,
-      meta: { datasetId: dataset.id },
-    });
     throw error;
-  } finally {
-    void removeSessionDir(sessionId);
   }
 }
