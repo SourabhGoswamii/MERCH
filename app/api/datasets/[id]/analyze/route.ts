@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { Prisma } from "@prisma/client";
 
 import { DatasetStatus } from "@/app/generated/prisma/client";
+import type { InputJsonValue } from "@/app/generated/prisma/internal/prismaNamespace";
 import { prisma } from "@/lib/db";
 
 type Column = { original: string; name: string; type: string };
 
 const TABLE_NAME_RE = /^[a-z0-9_]{1,64}$/;
 
-function toJsonValue(value: unknown): Prisma.InputJsonValue {
-  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+function toJsonValue(value: unknown): InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as InputJsonValue;
 }
 
 export async function POST(

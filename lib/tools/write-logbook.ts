@@ -1,5 +1,5 @@
 import { tool } from "@langchain/core/tools";
-import type { Prisma } from "@prisma/client";
+import type { InputJsonValue } from "@/app/generated/prisma/internal/prismaNamespace";
 import { z } from "zod";
 
 import { prisma } from "@/lib/db";
@@ -12,8 +12,8 @@ const schema = z.object({
   datasetIds: z.array(z.string()).optional(),
 });
 
-function toJsonValue(value: unknown): Prisma.InputJsonValue {
-  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+function toJsonValue(value: unknown): InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as InputJsonValue;
 }
 
 export const writeLogbook = tool(
