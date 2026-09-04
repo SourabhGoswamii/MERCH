@@ -132,6 +132,8 @@ export default function DashboardPage() {
   const [latestMode, setLatestMode] = useState<"initial_analysis" | "chat" | null>(null);
   const [logbookEntries, setLogbookEntries] = useState<string[]>([]);
   const [logbookPrompt, setLogbookPrompt] = useState(false);
+  const [savingToLogbook, setSavingToLogbook] = useState(false);
+  const [savedToLogbookAt, setSavedToLogbookAt] = useState<number | null>(null);
 
   const initialRunRef = useRef(false);
 
@@ -301,6 +303,46 @@ export default function DashboardPage() {
       agentMessage.trim(),
     ]);
     setLogbookPrompt(false);
+  }
+
+  async function saveAgentReplyToLogbook() {
+    if (!agentMessage.trim() || savingToLogbook) return;
+
+    setSavingToLogbook(true);
+    try {
+      const today = new Date().toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+
+      const primary = sections[0]?.title ?? "Agent response";
+
+      await fetch("/api/logbook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: latestMode === "initial_analysis" ? "ANALYSIS" : "INSIGHT",
+          title: `${primary} · ${today}`,
+          summary: agentMessage.trim(),
+          evidence: {
+            source: "dashboard",
+            mode: latestMode ?? "chat",
+            sectionCount: sections.length,
+            readyDatasets: readyDatasets.map((dataset) => ({
+              id: dataset.id,
+              fileName: dataset.fileName,
+            })),
+          },
+          datasetIds: readyDatasets.map((dataset) => dataset.id),
+        }),
+      });
+
+      setSavedToLogbookAt(Date.now());
+      setLogbookPrompt(false);
+    } finally {
+      setSavingToLogbook(false);
+    }
   }
 
   return (
@@ -694,6 +736,23 @@ export default function DashboardPage() {
                     );
                   })}
                 </div>
+
+                {agentMessage && !agentLoading && (
+                  <div className="logbook-save-row">
+                    <button
+                      type="button"
+                      onClick={() => void saveAgentReplyToLogbook()}
+                      disabled={savingToLogbook}
+                      className="logbook-save-btn"
+                    >
+                      {savingToLogbook
+                        ? "Saving…"
+                        : savedToLogbookAt
+                          ? "Saved to today's logbook ✓"
+                          : "Save today's content to logbook"}
+                    </button>
+                  </div>
+                )}
 
                 {logbookPrompt && (
                   <div className="logbook-question">
@@ -1666,6 +1725,51 @@ export default function DashboardPage() {
 
         .chat-placeholder p {
           margin: 0;
+        }
+
+        .logbook-save-row {
+          margin-top: 12px;
+          display: flex;
+          justify-content: flex-end;
+        }
+
+        .logbook-save-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+
+          padding: 9px 16px;
+
+          border: 1.5px solid var(--sage-deep);
+          border-radius: 999px;
+
+          background: var(--sage-deep);
+          color: #f4f2e9;
+
+          cursor: pointer;
+
+          font-family: var(--mono, monospace);
+          font-size: 8.5px;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+
+          box-shadow: 0 3px 12px rgba(51, 70, 58, 0.18);
+
+          transition:
+            background 150ms ease,
+            transform 150ms ease,
+            border-color 150ms ease;
+        }
+
+        .logbook-save-btn:hover:not(:disabled) {
+          background: #28392e;
+          border-color: #28392e;
+          transform: translateY(-1px);
+        }
+
+        .logbook-save-btn:disabled {
+          cursor: not-allowed;
+          opacity: 0.7;
         }
 
         .logbook-question {
