@@ -3,6 +3,14 @@
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
+console.log("DATABASE_URL configured:", !!process.env.DATABASE_URL);
+console.log(
+  "DATABASE_HOST:",
+  process.env.DATABASE_URL
+    ? new URL(process.env.DATABASE_URL).hostname
+    : "missing",
+);
+
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
