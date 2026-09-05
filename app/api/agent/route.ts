@@ -3,20 +3,14 @@ import { HumanMessage } from "@langchain/core/messages";
 
 import { compiledAgent } from "@/lib/agent/graph";
 import { setAgentLogSink } from "@/lib/agent/auditSink";
+import { extractText } from "@/lib/agent/extractText";
+import { INITIAL_ANALYSIS_PROMPT } from "@/lib/prompts";
 import type { AgentState } from "@/lib/agent/state";
 
 type AgentRequest = {
   mode?: "initial_analysis" | "chat";
   message?: string;
 };
-
-const INITIAL_ANALYSIS_PROMPT = `Run an initial business-growth analysis of my data.
-
-Identify 1 to 3 concrete revenue, customer, or product opportunities supported
-by my actual datasets. For each opportunity, include the supporting numbers,
-why it matters, and a single concrete recommended next step.
-
-End with a short prioritized summary.`;
 
 export const dynamic = "force-dynamic";
 
@@ -98,19 +92,7 @@ export async function POST(request: NextRequest) {
         const lastAi = [...(finalState.messages ?? [])]
           .reverse()
           .find((m) => m.getType() === "ai");
-        const responseText = lastAi
-          ? typeof lastAi.content === "string"
-            ? lastAi.content
-            : Array.isArray(lastAi.content)
-              ? (() => {
-                  try {
-                    return JSON.stringify(lastAi.content);
-                  } catch {
-                    return "";
-                  }
-                })()
-              : ""
-          : "";
+        const responseText = extractText(lastAi?.content);
 
         const result = {
           success: true,

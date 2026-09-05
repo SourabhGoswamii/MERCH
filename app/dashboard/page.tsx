@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { runAgentStream } from "@/lib/agentClient";
@@ -134,8 +134,7 @@ export default function DashboardPage() {
   const [logbookPrompt, setLogbookPrompt] = useState(false);
   const [savingToLogbook, setSavingToLogbook] = useState(false);
   const [savedToLogbookAt, setSavedToLogbookAt] = useState<number | null>(null);
-
-  const initialRunRef = useRef(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadDatasets = useCallback(async () => {
     try {
@@ -198,11 +197,11 @@ export default function DashboardPage() {
   );
 
   /*
-   * The agent receives ALL READY datasets.
-   * There is intentionally no "select dataset as context" state.
+   * The agent receives whatever datasets exist. No READY gate — the user
+   * can ask questions even with empty context.
    */
   async function runAgent(mode: "initial_analysis" | "chat") {
-    if (!readyDatasets.length || agentLoading) return;
+    if (agentLoading) return;
 
     const message = mode === "chat" ? agentRequest.trim() : undefined;
     if (mode === "chat" && !message) return;
@@ -237,20 +236,12 @@ export default function DashboardPage() {
   }
 
   /*
-   * Automatically analyse the shared workspace once the first READY dataset
-   * exists. Re-analysis resets this guard through a full page state update.
+   * Agents only run on explicit user action. No automatic analysis on
+   * mount, dataset creation, or status change.
    */
-  useEffect(() => {
-    if (!readyDatasets.length || initialRunRef.current || agentLoading) return;
-
-    initialRunRef.current = true;
-    void runAgent("initial_analysis");
-    // Intentionally only reacts to readiness of the shared workspace.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readyDatasets.length]);
 
   async function reanalyse(dataset: Dataset) {
-    if (dataset.status === "ANALYZING" || dataset.status === "UPLOADING") return;
+    if (dataset.status !== "READY") return;
 
     setAgentMessage("");
     setLatestMode(null);
@@ -280,13 +271,6 @@ export default function DashboardPage() {
       }
 
       await loadDatasets();
-
-      /*
-       * Give the shared agent a fresh pass after this dataset has been
-       * re-analysed. The agent still sees every READY dataset.
-       */
-      initialRunRef.current = true;
-      await runAgent("initial_analysis");
     } catch (error) {
       setAgentMessage(
         error instanceof Error ? error.message : "Re-analysis failed.",
@@ -303,6 +287,30 @@ export default function DashboardPage() {
       agentMessage.trim(),
     ]);
     setLogbookPrompt(false);
+  }
+
+  async function deleteDataset(id: string) {
+    setDeletingId(id);
+    try {
+      const response = await fetch(`/api/datasets/${id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(data.error ?? `Delete failed (${response.status})`);
+      }
+      setDatasets((current) => current.filter((d) => d.id !== id));
+      if (selectedId === id) setSelectedId(null);
+      if (detailsId === id) setDetailsId(null);
+    } catch (error) {
+      window.alert(
+        error instanceof Error ? error.message : "Delete failed",
+      );
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   async function saveAgentReplyToLogbook() {
@@ -467,13 +475,24 @@ export default function DashboardPage() {
                       <button
                         type="button"
                         onClick={() => void reanalyse(dataset)}
-                        disabled={
-                          dataset.status === "ANALYZING" ||
-                          dataset.status === "UPLOADING"
-                        }
+                        disabled={dataset.status !== "READY"}
                         className="dataset-action"
                       >
-                        Re-analyse
+                        {dataset.context?.context ? "Re-analyse" : "Analyze"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const confirmed = window.confirm(
+                            `Delete ${dataset.fileName}? This will remove its data table and any analysis.`,
+                          );
+                          if (confirmed) void deleteDataset(dataset.id);
+                        }}
+                        disabled={deletingId === dataset.id}
+                        className="dataset-action danger"
+                      >
+                        {deletingId === dataset.id ? "Deleting…" : "Delete"}
                       </button>
                     </div>
                   </div>
@@ -504,8 +523,8 @@ export default function DashboardPage() {
           <div className="context-note">
             <p className="context-note-label">Shared agent context</p>
             <p className="context-note-text">
-              {readyDatasets.length} ready dataset
-              {readyDatasets.length === 1 ? "" : "s"} available to MerchMind.
+              {datasets.length} dataset
+              {datasets.length === 1 ? "" : "s"} available to MerchMind.
             </p>
           </div>
         </aside>
@@ -693,7 +712,7 @@ export default function DashboardPage() {
                 <h2 className="serif section-title">Work with the agent.</h2>
               </div>
               <span className="section-side">
-                {readyDatasets.length} dataset · shared context
+                {datasets.length} dataset{datasets.length === 1 ? "" : "s"} · shared context
               </span>
             </div>
 
@@ -774,9 +793,9 @@ export default function DashboardPage() {
                 <p>
                   {agentLoading
                     ? "MerchMind is working through your shared business context…"
-                    : readyDatasets.length
-                      ? "Ask a question about your business. MerchMind will use every uploaded ready dataset as context."
-                      : "Upload a CSV to unlock the shared business agent."}
+                    : datasets.length
+                      ? "Ask a question about your business. MerchMind will use every uploaded dataset as context."
+                      : "Ask MerchMind anything. Upload a CSV any time to add context."}
                 </p>
               </div>
             )}
@@ -790,11 +809,11 @@ export default function DashboardPage() {
                 onKeyDown={(event) => {
                   if (event.key === "Enter") void runAgent("chat");
                 }}
-                disabled={!readyDatasets.length || agentLoading}
+                disabled={agentLoading}
                 placeholder={
-                  readyDatasets.length
+                  datasets.length
                     ? "Ask MerchMind anything about your business…"
-                    : "Your agent unlocks when a dataset is ready…"
+                    : "Ask MerchMind anything — datasets give it context."
                 }
               />
 
@@ -802,7 +821,6 @@ export default function DashboardPage() {
                 type="button"
                 onClick={() => void runAgent("chat")}
                 disabled={
-                  !readyDatasets.length ||
                   !agentRequest.trim() ||
                   agentLoading
                 }
@@ -1267,6 +1285,16 @@ export default function DashboardPage() {
         .dataset-action:disabled {
           cursor: not-allowed;
           opacity: 0.5;
+        }
+
+        .dataset-action.danger {
+          color: var(--clay-deep);
+        }
+
+        .dataset-action.danger:hover {
+          border-color: var(--clay-deep);
+          color: #fff9f5;
+          background: var(--clay-deep);
         }
 
         .add-csv {

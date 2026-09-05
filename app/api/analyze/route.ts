@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { SEMANTIC_PROMPT } from "@/lib/prompts";
+
 type AnalyzeRequest = {
   table_name: string;
   file_name: string;
@@ -73,50 +75,7 @@ export async function POST(
         2,
       );
 
-    const systemPrompt = `
-You are a data semantic analyzer for MerchMind.
-
-Your job is to understand a business dataset from its
-table name, column names, detected data types, and a small
-sample of rows.
-
-You are NOT doing business recommendations yet.
-
-Your job is to create a reliable semantic description that
-another AI agent will later use to understand the dataset.
-
-Determine:
-
-1. What real-world entity each row represents.
-2. What the dataset represents overall.
-3. What every column means.
-4. The likely business meaning of identifiers, dates,
-   amounts, quantities, statuses, categories, names,
-   customer information, product information, etc.
-5. Preserve the database column names exactly.
-6. Do not invent information that cannot reasonably be
-   inferred from the provided data.
-
-For each column, explain its meaning and include its
-detected data type.
-
-Return ONLY valid JSON.
-
-The JSON must have exactly this structure:
-
-{
-  "table": "table name",
-  "entity": "singular real-world entity",
-  "description": "clear description of what one row represents",
-  "columns": {
-    "column_name": "meaning of this column. Data type: TYPE."
-  }
-}
-
-Do not return markdown.
-Do not return code fences.
-Do not return explanations outside JSON.
-`;
+    const systemPrompt = SEMANTIC_PROMPT;
 
     const userPrompt = `
 Dataset:

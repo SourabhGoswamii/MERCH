@@ -25,15 +25,60 @@ export async function POST(
 
   const force = new URL(request.url).searchParams.get("force") === "true";
 
-  if (dataset.status === DatasetStatus.READY && !force) {
-    return NextResponse.json({ success: true, status: dataset.status });
+  /*
+   * Strict READY gate: only a fully uploaded dataset can be analyzed.
+   * `UPLOADING` means chunks are still arriving or the client hasn't
+   * sent the final `complete: true` signal yet. `FAILED` means a
+   * previous attempt errored; require an explicit re-analysis path.
+   * The "re-analyse" button uses ?force=true, which is handled below
+   * (READY + force re-runs the semantic pass).
+   */
+  if (dataset.status === DatasetStatus.UPLOADING) {
+    return NextResponse.json(
+      {
+        error: "Dataset upload is not complete yet",
+        status: dataset.status,
+      },
+      { status: 409 },
+    );
+  }
+
+  if (dataset.status === DatasetStatus.FAILED) {
+    return NextResponse.json(
+      {
+        error: "Dataset is in a failed state and cannot be analyzed",
+        status: dataset.status,
+      },
+      { status: 409 },
+    );
   }
 
   if (dataset.status === DatasetStatus.ANALYZING) {
     return NextResponse.json(
-      { error: "Analysis already in progress", status: dataset.status },
+      {
+        error: "Analysis already in progress",
+        status: dataset.status,
+      },
       { status: 409 },
     );
+  }
+
+  if (dataset.status !== DatasetStatus.READY) {
+    return NextResponse.json(
+      {
+        error: `Cannot analyze dataset in status ${String(dataset.status)}`,
+        status: dataset.status,
+      },
+      { status: 409 },
+    );
+  }
+
+  /*
+   * From here, dataset.status === READY. With force=true, re-run the
+   * semantic pass; otherwise short-circuit as a no-op success.
+   */
+  if (!force) {
+    return NextResponse.json({ success: true, status: dataset.status });
   }
 
   if (!TABLE_NAME_RE.test(dataset.tableName)) {

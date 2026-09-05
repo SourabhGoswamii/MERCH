@@ -1,422 +1,247 @@
 "use client";
 
+import Papa from "papaparse";
+
 import { audit, type AuditEvent } from "@/lib/audit";
+
+const ROW_CHUNK_SIZE = 500;
+const ROW_CHUNK_SIZE_DEFAULT = 500;
 
 export type UploadProgress = {
   fileName: string;
   totalBytes: number;
+  totalRows: number;
   totalChunks: number;
   chunksSent: number;
-  bytesSent: number;
+  rowsSent: number;
   state:
     | "idle"
-    | "creating"
+    | "parsing"
     | "uploading"
-    | "finalizing"
     | "completed"
     | "failed";
   error?: string;
   datasetId?: string;
   tableName?: string;
-  rowCount?: number;
 };
 
 export type UploadOptions = {
   onProgress?: (progress: UploadProgress) => void;
-  chunkSize?: number;
-  maxConcurrentChunks?: number;
+  rowChunkSize?: number;
 };
 
-const DEFAULT_CHUNK_SIZE = 256 * 1024;
-const DEFAULT_CONCURRENCY = 2;
+type ParsedCsv = {
+  headers: string[];
+  rows: Record<string, string>[];
+};
+
+async function parseCsvInBrowser(file: File): Promise<ParsedCsv> {
+  const text = await file.text();
+  return new Promise((resolve, reject) => {
+    Papa.parse<Record<string, string>>(text, {
+      header: true,
+      skipEmptyLines: true,
+      complete(result) {
+        resolve({
+          headers: result.meta.fields ?? [],
+          rows: result.data,
+        });
+      },
+      error(err: Error) {
+        reject(err);
+      },
+    });
+  });
+}
 
 export async function uploadCsvInChunks(
   file: File,
   options: UploadOptions = {},
 ): Promise<UploadProgress> {
-  const chunkSize = options.chunkSize ?? DEFAULT_CHUNK_SIZE;
-  const maxConcurrentChunks =
-    options.maxConcurrentChunks ?? DEFAULT_CONCURRENCY;
-
-  /*
-   * On serverless platforms (Vercel, AWS Lambda) each request may run in a
-   * different instance with an isolated /tmp filesystem. The chunked upload
-   * protocol requires every chunk to land on the same instance as the
-   * session creator, which is not guaranteed. Fall back to a single-shot
-   * upload so the file stays inside one request.
-   */
-  const canChunk = await supportsChunkedUpload();
-  if (!canChunk) {
-    return uploadSingleShot(file, options);
-  }
-
   const fileName = file.name;
   const totalBytes = file.size;
-  const totalChunks = Math.max(1, Math.ceil(totalBytes / chunkSize));
+  const rowChunkSize = options.rowChunkSize ?? ROW_CHUNK_SIZE_DEFAULT;
 
   const progress: UploadProgress = {
     fileName,
     totalBytes,
-    totalChunks,
+    totalRows: 0,
+    totalChunks: 0,
     chunksSent: 0,
-    bytesSent: 0,
-    state: "creating",
+    rowsSent: 0,
+    state: "idle",
   };
-
   const update = (patch: Partial<UploadProgress>) => {
     Object.assign(progress, patch);
     options.onProgress?.(progress);
   };
 
+  update({ state: "parsing" });
   audit.record({
     level: "info",
     type: "upload.session.create",
-    message: `Requesting upload session for ${fileName} (${totalBytes} bytes, ${totalChunks} chunks)`,
-    meta: { fileName, totalBytes, totalChunks, chunkSize },
+    message: `Parsing ${fileName} (${totalBytes} bytes)`,
+    meta: { fileName, totalBytes, mode: "browser-parsed" },
   });
 
-  let sessionId: string;
+  let parsed: ParsedCsv;
   try {
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fileName, totalSize: totalBytes }),
-    });
-    const data = (await res.json()) as {
-      success?: boolean;
-      sessionId?: string;
-      chunkSize?: number;
-      error?: string;
-    };
-    if (!res.ok || !data.success || !data.sessionId) {
-      throw new Error(data.error ?? "Failed to create upload session");
-    }
-    sessionId = data.sessionId;
+    parsed = await parseCsvInBrowser(file);
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Failed to start upload";
+      error instanceof Error ? error.message : "Failed to parse CSV";
     update({ state: "failed", error: message });
     audit.record({
       level: "error",
       type: "upload.error",
-      message: `Could not start upload of ${fileName}: ${message}`,
+      message: `Parse failed for ${fileName}: ${message}`,
       meta: { fileName, error: message },
     });
     throw error;
   }
 
-  update({ state: "uploading" });
-
-  const queue: number[] = [];
-  for (let i = 0; i < totalChunks; i++) queue.push(i);
-
-  const sendOne = async (index: number) => {
-    const start = index * chunkSize;
-    const end = Math.min(start + chunkSize, totalBytes);
-    const blob = file.slice(start, end);
-    const buf = await blob.arrayBuffer();
-
+  if (!parsed.headers.length) {
+    const message = `${fileName} has no columns`;
+    update({ state: "failed", error: message });
     audit.record({
-      level: "info",
-      type: "upload.chunk.start",
-      message: `Sending chunk ${index + 1}/${totalChunks} (${buf.byteLength} bytes)`,
-      meta: { sessionId, index, bytes: buf.byteLength },
+      level: "error",
+      type: "upload.error",
+      message,
+      meta: { fileName },
     });
+    throw new Error(message);
+  }
 
-    let attempts = 0;
-    const maxAttempts = 3;
-    let lastError: unknown = null;
-    while (attempts < maxAttempts) {
-      attempts++;
-      try {
-        const res = await fetch(
-          `/api/upload/${sessionId}/chunk?index=${index}`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/octet-stream" },
-            body: buf,
-          },
-        );
-        if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as {
-            error?: string;
-          };
-          throw new Error(data.error ?? `HTTP ${res.status}`);
-        }
-        lastError = null;
-        break;
-      } catch (err) {
-        lastError = err;
-        if (attempts < maxAttempts) {
-          const delay = 250 * attempts;
-          await new Promise((r) => setTimeout(r, delay));
-        }
-      }
+  const totalRows = parsed.rows.length;
+  const totalChunks = Math.max(1, Math.ceil(totalRows / rowChunkSize));
+  update({ totalRows, totalChunks, state: "uploading" });
+
+  audit.record({
+    level: "info",
+    type: "upload.session.create",
+    message: `Sending ${totalRows} rows in ${totalChunks} chunk${totalChunks === 1 ? "" : "s"} of ${rowChunkSize}`,
+    meta: {
+      fileName,
+      totalRows,
+      totalChunks,
+      chunkSize: rowChunkSize,
+    },
+  });
+
+  /*
+   * ponytail: chunks are sent sequentially, one at a time, in order.
+   * This trades throughput for protocol simplicity and exact ordering
+   * (rows never interleave, no out-of-order risk on a flaky network).
+   * Upgrade path: bounded concurrency on the same dataset if the dataset
+   * is large enough that throughput matters.
+   */
+  let datasetId: string | undefined;
+  let tableName: string | undefined;
+  let rowsSent = 0;
+
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+    const start = chunkIndex * rowChunkSize;
+    const end = Math.min(start + rowChunkSize, totalRows);
+    const rows = parsed.rows.slice(start, end);
+    const isLastChunk = chunkIndex === totalChunks - 1;
+
+    /*
+     * The client tells the server whether more chunks are coming. The
+     * server no longer infers "last" from row count — that broke on
+     * exact multiples of 500. A final chunk with 0 rows is valid
+     * (e.g. a 1000-row file ends with `rows: []`, complete: true).
+     */
+    const body: {
+      rows?: Record<string, string>[];
+      complete: boolean;
+      fileName?: string;
+      headers?: string[];
+    } = {
+      rows,
+      complete: isLastChunk,
+    };
+    if (!datasetId) {
+      body.fileName = fileName;
+      body.headers = parsed.headers;
     }
-    if (lastError) {
+
+    let response: Response;
+    try {
+      response = datasetId
+        ? await fetch(`/api/upload/${datasetId}/chunk`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          })
+        : await fetch("/api/upload", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+    } catch (error) {
       const message =
-        lastError instanceof Error
-          ? lastError.message
-          : "Chunk upload failed";
+        error instanceof Error ? error.message : "Upload failed";
+      update({ state: "failed", error: message });
       audit.record({
         level: "error",
-        type: "upload.chunk.error",
-        message: `Chunk ${index + 1}/${totalChunks} failed: ${message}`,
-        meta: { sessionId, index, error: message },
+        type: "upload.error",
+        message: `Chunk ${chunkIndex + 1}/${totalChunks} failed for ${fileName}: ${message}`,
+        meta: { fileName, chunkIndex, error: message },
+      });
+      throw error;
+    }
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      const message = data.error ?? `Upload failed (${response.status})`;
+      update({ state: "failed", error: message });
+      audit.record({
+        level: "error",
+        type: "upload.error",
+        message: `Chunk ${chunkIndex + 1}/${totalChunks} failed for ${fileName}: ${message}`,
+        meta: { fileName, chunkIndex, status: response.status, error: message },
       });
       throw new Error(message);
     }
-    progress.chunksSent += 1;
-    progress.bytesSent += buf.byteLength;
-    options.onProgress?.(progress);
-  };
 
-  try {
-    const workers: Promise<void>[] = [];
-    for (
-      let w = 0;
-      w < Math.min(maxConcurrentChunks, totalChunks);
-      w++
-    ) {
-      workers.push(
-        (async () => {
-          while (queue.length) {
-            const next = queue.shift();
-            if (next === undefined) return;
-            await sendOne(next);
-          }
-        })(),
-      );
-    }
-    await Promise.all(workers);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Upload failed";
-    update({ state: "failed", error: message });
-    audit.record({
-      level: "error",
-      type: "upload.error",
-      message: `Upload failed for ${fileName}: ${message}`,
-      meta: { sessionId, error: message },
-    });
-    throw error;
-  }
-
-  update({ state: "finalizing" });
-  audit.record({
-    level: "info",
-    type: "upload.finalize",
-    message: `Finalizing ${fileName} (assembling + analyzing)`,
-    meta: { sessionId, fileName },
-  });
-
-  try {
-    const res = await fetch(`/api/upload/${sessionId}/finalize`, {
-      method: "POST",
-    });
-    if (!res.ok || !res.body) {
-      const txt = await res.text().catch(() => "");
-      throw new Error(`Finalize failed: ${res.status} ${txt}`);
-    }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let finalResult:
-      | { type: "result"; data: Record<string, unknown> }
-      | { type: "error"; error: string }
-      | null = null;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let nl: number;
-      while ((nl = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, nl).trim();
-        buffer = buffer.slice(nl + 1);
-        if (!line) continue;
-        try {
-          const evt = JSON.parse(line) as
-            | ServerLine
-            | { type: "result"; data: Record<string, unknown> }
-            | { type: "error"; error: string };
-          if ((evt as { type: string }).type === "result") {
-            finalResult = evt as {
-              type: "result";
-              data: Record<string, unknown>;
-            };
-          } else if ((evt as { type: string }).type === "error") {
-            finalResult = evt as { type: "error"; error: string };
-          } else {
-            const sl = evt as ServerLine;
-            const level = (sl.level ?? "info") as AuditEvent["level"];
-            audit.record({
-              level,
-              type: mapServerType(sl.type),
-              message: sl.message ?? sl.type,
-              meta: sl.meta,
-            });
-          }
-        } catch {
-          /* ignore malformed line */
-        }
-      }
-    }
-
-    if (finalResult && "error" in finalResult) {
-      throw new Error(finalResult.error);
-    }
-    if (!finalResult || !("data" in finalResult)) {
-      throw new Error("Finalize completed without a result");
-    }
-    const data = finalResult.data;
-    update({
-      state: "completed",
-      datasetId: typeof data.datasetId === "string" ? data.datasetId : undefined,
-      tableName: typeof data.tableName === "string" ? data.tableName : undefined,
-      rowCount: typeof data.rowCount === "number" ? data.rowCount : undefined,
-    });
-    return progress;
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Finalize failed";
-    update({ state: "failed", error: message });
-    audit.record({
-      level: "error",
-      type: "upload.error",
-      message: `Finalize failed for ${fileName}: ${message}`,
-      meta: { sessionId, error: message },
-    });
-    throw error;
-  }
-}
-
-type ServerLine = {
-  ts?: number;
-  level?: "info" | "ok" | "warn" | "error";
-  type: string;
-  message?: string;
-  meta?: Record<string, unknown>;
-};
-
-function mapServerType(type: string): AuditEvent["type"] {
-  const allowed: AuditEvent["type"][] = [
-    "page.nav",
-    "page.load",
-    "api.request",
-    "api.response",
-    "api.error",
-    "upload.session.create",
-    "upload.chunk.start",
-    "upload.chunk.sent",
-    "upload.chunk.ack",
-    "upload.chunk.error",
-    "upload.finalize",
-    "upload.assembled",
-    "upload.parsed",
-    "upload.table.created",
-    "upload.rows.inserted",
-    "upload.complete",
-    "upload.error",
-    "analyze.request",
-    "analyze.response",
-    "analyze.error",
-    "agent.start",
-    "agent.tool.start",
-    "agent.tool.end",
-    "agent.tool.error",
-    "agent.end",
-    "agent.error",
-    "tool.execute",
-    "dataset.create",
-    "warn",
-    "error",
-    "info",
-  ];
-  if ((allowed as string[]).includes(type)) {
-    return type as AuditEvent["type"];
-  }
-  return "info";
-}
-
-async function supportsChunkedUpload(): Promise<boolean> {
-  try {
-    const res = await fetch("/api/upload-file", {
-      method: "GET",
-      cache: "no-store",
-    });
-    if (!res.ok) return true;
-    const data = (await res.json()) as { chunked?: boolean };
-    return data.chunked !== false;
-  } catch {
-    return true;
-  }
-}
-
-async function uploadSingleShot(
-  file: File,
-  options: UploadOptions,
-): Promise<UploadProgress> {
-  const fileName = file.name;
-  const totalBytes = file.size;
-
-  const progress: UploadProgress = {
-    fileName,
-    totalBytes,
-    totalChunks: 1,
-    chunksSent: 0,
-    bytesSent: 0,
-    state: "creating",
-  };
-  const update = (patch: Partial<UploadProgress>) => {
-    Object.assign(progress, patch);
-    options.onProgress?.(progress);
-  };
-
-  audit.record({
-    level: "info",
-    type: "upload.session.create",
-    message: `Single-shot upload of ${fileName} (${totalBytes} bytes)`,
-    meta: { fileName, totalBytes, mode: "single-shot" },
-  });
-
-  update({ state: "uploading" });
-
-  try {
-    const res = await fetch("/api/upload-file", {
-      method: "POST",
-      headers: { "x-file-name": fileName },
-      body: file,
-    });
-    const data = (await res.json().catch(() => ({}))) as {
-      success?: boolean;
-      error?: string;
+    const data = (await response.json()) as {
       datasetId?: string;
       tableName?: string;
-      rowCount?: number;
+      rowsReceived?: number;
+      complete?: boolean;
     };
-    if (!res.ok || !data.success) {
-      throw new Error(data.error ?? `Upload failed (${res.status})`);
-    }
-    progress.chunksSent = 1;
-    progress.bytesSent = totalBytes;
-    update({
-      state: "completed",
-      datasetId: data.datasetId,
-      tableName: data.tableName,
-      rowCount: data.rowCount,
-    });
-    return progress;
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Upload failed";
-    update({ state: "failed", error: message });
+
+    datasetId = data.datasetId ?? datasetId;
+    tableName = data.tableName ?? tableName;
+    rowsSent = data.rowsReceived ?? rowsSent + rows.length;
+    progress.chunksSent += 1;
+    progress.rowsSent = rowsSent;
+    options.onProgress?.(progress);
+
     audit.record({
-      level: "error",
-      type: "upload.error",
-      message: `Single-shot upload failed for ${fileName}: ${message}`,
-      meta: { fileName, error: message },
+      level: "ok",
+      type: "upload.chunk.ack",
+      message: `Chunk ${chunkIndex + 1}/${totalChunks} acknowledged (${rows.length} rows, complete=${isLastChunk})`,
+      meta: {
+        fileName,
+        datasetId,
+        chunkIndex,
+        rowsInChunk: rows.length,
+        rowsSent,
+        complete: data.complete,
+      },
     });
-    throw error;
+
+    if (data.complete) break;
   }
+
+  update({
+    state: "completed",
+    datasetId,
+    tableName,
+    rowsSent,
+  });
+  return progress;
 }

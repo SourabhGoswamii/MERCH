@@ -1,3 +1,10 @@
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=
 DATABASE_URL=
+
+# System prompts. Each variable is read by lib/prompts.ts at request
+# time; if unset, a hard-coded fallback is used. Leave blank to keep the
+# built-in behavior. These are server-only — never use NEXT_PUBLIC_.
+MERCH_SEMANTIC_PROMPT=
+MERCH_AGENT_PROMPT=
+MERCH_INITIAL_ANALYSIS_PROMPT=

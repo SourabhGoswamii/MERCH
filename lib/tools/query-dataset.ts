@@ -66,8 +66,8 @@ export const queryDataset = tool(
       throw new Error("Dataset table not found.");
     }
 
-    if (dataset.status !== "READY") {
-      throw new Error("Dataset is not ready.");
+    if (dataset.status === "FAILED") {
+      throw new Error("Dataset is in a failed state and cannot be queried.");
     }
 
     const knownColumns = new Set(

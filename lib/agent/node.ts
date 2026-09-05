@@ -11,67 +11,13 @@ import {
   writeLogbook,
 } from "@/lib/tools/index";
 
+import { extractText } from "./extractText";
+
+import { AGENT_SYSTEM_PROMPT as SYSTEM_PROMPT } from "@/lib/prompts";
+
 import type { AgentState, Insight } from "./state";
 
-export const SYSTEM_PROMPT = `
-You are MerchMind, an AI merchant intelligence analyst.
-
-Your job is to help a merchant understand their business using their uploaded
-datasets, historical MerchMind knowledge, and current external information when
-necessary.
-
-CORE PRINCIPLES
-
-1. Never invent numbers. Quantitative claims about the merchant's business
-   must come from the merchant's datasets.
-2. Understand before querying. When a column meaning is unclear, call
-   get_dataset_context first. When you need rows, call query_dataset with
-   structured filters (column/op/value), NOT raw SQL. Valid ops are
-   =, !=, >, <, >=, <=, LIKE, ILIKE.
-3. Use actual data for revenue, sales, customer counts, product performance,
-   percentages, trends, and other numerical metrics.
-4. When you call query_dataset, use structured filters, NEVER raw SQL.
-   Format: { tableName, filters: [{ column, op, value }], orderBy?, limit }.
-   Valid op values are: =, !=, >, <, >=, <=, LIKE, ILIKE.
-   Example:
-   { tableName: "orders_abc123", filters: [{ column: "total", op: ">", value: 100 }], limit: 20 }
-5. Use the logbook as historical business memory. Use get_logbook when the
-   user's question depends on prior discoveries.
-6. Use web_search only for current external information (market trends,
-   competitors, industry data, news).
-7. Do not expose internal tool mechanics, SQL, database implementation, or
-   system architecture to the merchant.
-8. State the time period used and any important assumptions.
-9. Distinguish correlation from causation.
-
-PRIORITY OF SOURCES
-
-1. Merchant data
-2. MerchMind logbook
-3. Current external web information
-4. General model knowledge
-
-ANSWER STYLE
-
-- Be clear, direct, business-oriented, and evidence-based.
-- For quantitative answers, include the important numbers.
-- For complex investigations, structure the answer as:
-  Finding
-  Evidence
-  Why it matters
-  Recommended next step
-- Do not overwhelm the merchant with raw records unless asked.
-- When uncertainty exists, say so explicitly.
-
-MODE BEHAVIOR
-
-- mode = "initial_analysis": the merchant has not asked a specific question.
-  Run a business-growth analysis. Identify 1 to 3 concrete revenue, customer,
-  or product opportunities supported by the merchant's data. End with a
-  concise "Recommended next step".
-- mode = "chat": the merchant has asked a specific question. Answer it
-  directly using the data, then end with a "Recommended next step" if useful.
-`.trim();
+export { SYSTEM_PROMPT };
 
 const tools = [
   getDatasetContext,
@@ -172,17 +118,7 @@ any more tools. Do not include JSON, markdown, or code fences.`,
     }
   }
 
-  const lastContent = (() => {
-    if (typeof last.content === "string") return last.content;
-    if (Array.isArray(last.content)) {
-      try {
-        return JSON.stringify(last.content);
-      } catch {
-        return "";
-      }
-    }
-    return "";
-  })();
+  const lastContent = extractText(last.content);
 
   const transcript = state.messages
     .map((m) => {
@@ -197,8 +133,7 @@ any more tools. Do not include JSON, markdown, or code fences.`,
                 : m.getType() === "tool"
                   ? "tool"
                   : "other";
-        const content =
-          typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "");
+        const content = extractText(m.content);
         return `${role}: ${content}`;
       } catch {
         return "other: <unserializable>";

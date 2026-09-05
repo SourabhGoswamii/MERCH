@@ -9,12 +9,7 @@ import {
   type UploadProgress,
 } from "@/lib/uploadClient";
 
-type FileStatus =
-  | "pending"
-  | "uploading"
-  | "finalizing"
-  | "completed"
-  | "failed";
+type FileStatus = "pending" | "uploading" | "completed" | "failed";
 
 type QueueItem = {
   id: string;
@@ -196,8 +191,8 @@ export default function UploadPage() {
               status:
                 progress.state === "uploading"
                   ? "uploading"
-                  : progress.state === "finalizing"
-                    ? "finalizing"
+                  : progress.state === "parsing"
+                    ? "uploading"
                     : current.status,
               progress,
             }));
@@ -212,14 +207,10 @@ export default function UploadPage() {
 
         showToast(`${item.file.name} uploaded successfully`);
 
-        if (result.datasetId) {
-          void fetch(
-            `/api/datasets/${result.datasetId}/analyze`,
-            {
-              method: "POST",
-            },
-          );
-        }
+        /*
+         * No automatic analyze. The merchant explicitly chooses when to
+         * analyze a dataset from the dashboard.
+         */
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Upload failed";
@@ -255,9 +246,7 @@ export default function UploadPage() {
   ).length;
 
   const uploading = items.filter(
-    (item) =>
-      item.status === "uploading" ||
-      item.status === "finalizing",
+    (item) => item.status === "uploading",
   ).length;
 
   const failed = items.filter(
@@ -265,7 +254,7 @@ export default function UploadPage() {
   ).length;
 
   const totalRows = items.reduce(
-    (total, item) => total + (item.progress?.rowCount ?? 0),
+    (total, item) => total + (item.progress?.rowsSent ?? 0),
     0,
   );
 
@@ -1261,19 +1250,16 @@ function QueueRow({
   const { file, status, progress, error } = item;
 
   const percentage =
-    progress && progress.totalBytes > 0
+    progress && progress.totalChunks > 0
       ? Math.min(
           100,
-          Math.round(
-            (progress.bytesSent / progress.totalBytes) * 100,
-          ),
+          Math.round((progress.chunksSent / progress.totalChunks) * 100),
         )
       : 0;
 
   const statusText: Record<FileStatus, string> = {
     pending: "Ready to upload",
     uploading: "Uploading",
-    finalizing: "Preparing dataset",
     completed: "Uploaded successfully",
     failed: "Upload failed",
   };
@@ -1302,8 +1288,15 @@ function QueueRow({
                 <i />
 
                 <span>
-                  {progress.chunksSent ?? 0}/
-                  {progress.totalChunks ?? 0} chunks
+                  chunk {progress.chunksSent ?? 0}/
+                  {progress.totalChunks ?? 0}
+                </span>
+
+                <i />
+
+                <span>
+                  {progress.rowsSent ?? 0}/
+                  {progress.totalRows ?? 0} rows
                 </span>
 
                 <i />
@@ -1313,18 +1306,18 @@ function QueueRow({
             )}
 
             {status === "completed" &&
-              progress?.rowCount !== undefined && (
+              progress?.rowsSent !== undefined && (
                 <>
                   <i />
 
                   <span>
-                    {progress.rowCount.toLocaleString()} rows
+                    {progress.rowsSent.toLocaleString()} rows
                   </span>
                 </>
               )}
           </div>
 
-          {(status === "uploading" || status === "finalizing") && (
+          {(status === "uploading") && (
             <div className="queue-progress">
               <div
                 style={{
@@ -1369,7 +1362,7 @@ function QueueRow({
             </>
           )}
 
-          {(status === "uploading" || status === "finalizing") && (
+          {(status === "uploading") && (
             <span className="spinner" />
           )}
 
@@ -1487,8 +1480,7 @@ function QueueRow({
           flex-shrink: 0;
         }
 
-        .status-uploading,
-        .status-finalizing {
+        .status-uploading {
           background: var(--amber);
         }
 
