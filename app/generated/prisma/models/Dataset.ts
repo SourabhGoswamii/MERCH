@@ -235,7 +235,7 @@ export type DatasetWhereInput = {
   AND?: Prisma.DatasetWhereInput | Prisma.DatasetWhereInput[]
   OR?: Prisma.DatasetWhereInput[]
   NOT?: Prisma.DatasetWhereInput | Prisma.DatasetWhereInput[]
-  id?: Prisma.StringFilter<"Dataset"> | string
+  id?: Prisma.UuidFilter<"Dataset"> | string
   fileName?: Prisma.StringFilter<"Dataset"> | string
   tableName?: Prisma.StringFilter<"Dataset"> | string
   rowCount?: Prisma.IntFilter<"Dataset"> | number
@@ -297,7 +297,7 @@ export type DatasetScalarWhereWithAggregatesInput = {
   AND?: Prisma.DatasetScalarWhereWithAggregatesInput | Prisma.DatasetScalarWhereWithAggregatesInput[]
   OR?: Prisma.DatasetScalarWhereWithAggregatesInput[]
   NOT?: Prisma.DatasetScalarWhereWithAggregatesInput | Prisma.DatasetScalarWhereWithAggregatesInput[]
-  id?: Prisma.StringWithAggregatesFilter<"Dataset"> | string
+  id?: Prisma.UuidWithAggregatesFilter<"Dataset"> | string
   fileName?: Prisma.StringWithAggregatesFilter<"Dataset"> | string
   tableName?: Prisma.StringWithAggregatesFilter<"Dataset"> | string
   rowCount?: Prisma.IntWithAggregatesFilter<"Dataset"> | number

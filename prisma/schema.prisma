@@ -7,6 +7,47 @@ datasource db {
   provider = "postgresql"
 }
 
+model Dataset {
+  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  fileName  String          @map("file_name")
+  tableName String          @unique @map("table_name")
+  rowCount  Int             @default(0) @map("row_count")
+  columns   Json
+  status    DatasetStatus   @default(UPLOADING)
+  error     String?
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @default(now()) @updatedAt @map("updated_at")
+  context   DatasetContext?
+
+  @@map("datasets")
+}
+
+model DatasetContext {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  datasetId String   @unique @map("dataset_id") @db.Uuid
+  context   Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  dataset   Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  @@map("dataset_context")
+}
+
+model LogbookEntry {
+  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type       LogbookEntryType
+  title      String
+  summary    String
+  evidence   Json?
+  datasetIds Json?
+  createdAt  DateTime         @default(now()) @map("created_at")
+  updatedAt  DateTime         @default(now()) @updatedAt @map("updated_at")
+
+  @@index([createdAt])
+  @@index([type])
+  @@map("logbook_entries")
+}
+
 enum DatasetStatus {
   UPLOADING
   ANALYZING
@@ -14,49 +55,9 @@ enum DatasetStatus {
   FAILED
 }
 
-model Dataset {
-  id        String        @id @default(uuid())
-  fileName  String        @map("file_name")
-  tableName String        @unique @map("table_name")
-  rowCount  Int           @default(0) @map("row_count")
-  columns   Json
-  status    DatasetStatus @default(UPLOADING)
-  error     String?
-  createdAt DateTime      @default(now()) @map("created_at")
-  updatedAt DateTime      @updatedAt @map("updated_at")
-  context   DatasetContext?
-
-  @@map("datasets")
-}
-
-model DatasetContext {
-  id        String   @id @default(uuid())
-  datasetId String   @unique @map("dataset_id")
-  context   Json
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  dataset   Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
-
-  @@map("dataset_context")
-}
 enum LogbookEntryType {
   ANALYSIS
   INSIGHT
   DECISION
   RESEARCH
-}
-
-model LogbookEntry {
-  id         String          @id @default(uuid())
-  type       LogbookEntryType
-  title      String
-  summary    String
-  evidence   Json?
-  datasetIds Json?
-  createdAt  DateTime        @default(now()) @map("created_at")
-  updatedAt  DateTime        @updatedAt @map("updated_at")
-
-  @@index([createdAt])
-  @@index([type])
-  @@map("logbook_entries")
 }

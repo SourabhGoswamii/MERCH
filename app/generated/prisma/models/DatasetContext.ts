@@ -173,8 +173,8 @@ export type DatasetContextWhereInput = {
   AND?: Prisma.DatasetContextWhereInput | Prisma.DatasetContextWhereInput[]
   OR?: Prisma.DatasetContextWhereInput[]
   NOT?: Prisma.DatasetContextWhereInput | Prisma.DatasetContextWhereInput[]
-  id?: Prisma.StringFilter<"DatasetContext"> | string
-  datasetId?: Prisma.StringFilter<"DatasetContext"> | string
+  id?: Prisma.UuidFilter<"DatasetContext"> | string
+  datasetId?: Prisma.UuidFilter<"DatasetContext"> | string
   context?: Prisma.JsonFilter<"DatasetContext">
   createdAt?: Prisma.DateTimeFilter<"DatasetContext"> | Date | string
   updatedAt?: Prisma.DateTimeFilter<"DatasetContext"> | Date | string
@@ -217,8 +217,8 @@ export type DatasetContextScalarWhereWithAggregatesInput = {
   AND?: Prisma.DatasetContextScalarWhereWithAggregatesInput | Prisma.DatasetContextScalarWhereWithAggregatesInput[]
   OR?: Prisma.DatasetContextScalarWhereWithAggregatesInput[]
   NOT?: Prisma.DatasetContextScalarWhereWithAggregatesInput | Prisma.DatasetContextScalarWhereWithAggregatesInput[]
-  id?: Prisma.StringWithAggregatesFilter<"DatasetContext"> | string
-  datasetId?: Prisma.StringWithAggregatesFilter<"DatasetContext"> | string
+  id?: Prisma.UuidWithAggregatesFilter<"DatasetContext"> | string
+  datasetId?: Prisma.UuidWithAggregatesFilter<"DatasetContext"> | string
   context?: Prisma.JsonWithAggregatesFilter<"DatasetContext">
   createdAt?: Prisma.DateTimeWithAggregatesFilter<"DatasetContext"> | Date | string
   updatedAt?: Prisma.DateTimeWithAggregatesFilter<"DatasetContext"> | Date | string

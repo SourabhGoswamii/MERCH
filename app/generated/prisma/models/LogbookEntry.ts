@@ -190,7 +190,7 @@ export type LogbookEntryWhereInput = {
   AND?: Prisma.LogbookEntryWhereInput | Prisma.LogbookEntryWhereInput[]
   OR?: Prisma.LogbookEntryWhereInput[]
   NOT?: Prisma.LogbookEntryWhereInput | Prisma.LogbookEntryWhereInput[]
-  id?: Prisma.StringFilter<"LogbookEntry"> | string
+  id?: Prisma.UuidFilter<"LogbookEntry"> | string
   type?: Prisma.EnumLogbookEntryTypeFilter<"LogbookEntry"> | $Enums.LogbookEntryType
   title?: Prisma.StringFilter<"LogbookEntry"> | string
   summary?: Prisma.StringFilter<"LogbookEntry"> | string
@@ -243,7 +243,7 @@ export type LogbookEntryScalarWhereWithAggregatesInput = {
   AND?: Prisma.LogbookEntryScalarWhereWithAggregatesInput | Prisma.LogbookEntryScalarWhereWithAggregatesInput[]
   OR?: Prisma.LogbookEntryScalarWhereWithAggregatesInput[]
   NOT?: Prisma.LogbookEntryScalarWhereWithAggregatesInput | Prisma.LogbookEntryScalarWhereWithAggregatesInput[]
-  id?: Prisma.StringWithAggregatesFilter<"LogbookEntry"> | string
+  id?: Prisma.UuidWithAggregatesFilter<"LogbookEntry"> | string
   type?: Prisma.EnumLogbookEntryTypeWithAggregatesFilter<"LogbookEntry"> | $Enums.LogbookEntryType
   title?: Prisma.StringWithAggregatesFilter<"LogbookEntry"> | string
   summary?: Prisma.StringWithAggregatesFilter<"LogbookEntry"> | string
